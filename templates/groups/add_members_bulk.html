@@ -1,0 +1,80 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %}{{ page_title }} - Seashore Microfinance{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <!-- Header -->
+    <div class="mb-6">
+        <div class="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+            <a href="{% url 'core:group_list' %}" class="hover:text-primary-600">Groups</a>
+            <span>/</span>
+            <a href="{% url 'core:group_detail' group.id %}" class="hover:text-primary-600">{{ group.name }}</a>
+            <span>/</span>
+            <span>Bulk Add Members</span>
+        </div>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ page_title }}</h1>
+    </div>
+
+    <!-- Info Notice -->
+    <div class="bg-purple-50 dark:bg-purple-900/20 border-l-4 border-purple-500 p-4 mb-6">
+        <div class="flex">
+            <div class="flex-shrink-0">
+                <i class="fas fa-info-circle text-purple-400"></i>
+            </div>
+            <div class="ml-3">
+                <h3 class="text-sm font-medium text-purple-800 dark:text-purple-300 mb-1">Bulk Membership Request</h3>
+                <div class="text-sm text-purple-700 dark:text-purple-300 space-y-1">
+                    <p>Add multiple members to the group at once. All members will be added with <strong>Pending status</strong> and require approval.</p>
+                    <p><strong>How to select multiple clients:</strong></p>
+                    <ul class="list-disc ml-5 mt-1">
+                        <li>Hold <kbd class="px-1 py-0.5 bg-white dark:bg-gray-700 rounded text-xs">Ctrl</kbd> (Windows/Linux) or <kbd class="px-1 py-0.5 bg-white dark:bg-gray-700 rounded text-xs">Cmd</kbd> (Mac) and click to select multiple clients</li>
+                        <li>Only clients not currently in any group will be shown</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6">
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Select Clients <span class="text-red-500">*</span>
+                </label>
+                {{ form.clients }}
+                {% if form.clients.errors %}
+                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.clients.errors.0 }}</p>
+                {% endif %}
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ form.clients.help_text }}</p>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Default Role <span class="text-red-500">*</span>
+                </label>
+                {{ form.default_role }}
+                {% if form.default_role.errors %}
+                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.default_role.errors.0 }}</p>
+                {% endif %}
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ form.default_role.help_text }}</p>
+            </div>
+
+            <!-- Buttons -->
+            <div class="flex items-center justify-end space-x-3 pt-4">
+                <a href="{% url 'core:group_detail' group.id %}"
+                   class="px-6 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                    Cancel
+                </a>
+                <button type="submit"
+                        class="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition-colors">
+                    <i class="fas fa-users-plus mr-2"></i>Add Selected Members
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

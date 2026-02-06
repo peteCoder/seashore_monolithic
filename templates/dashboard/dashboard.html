@@ -1,0 +1,326 @@
+{% extends 'layouts/base.html' %}
+{% load humanize %}
+
+{% block title %}Dashboard - Seashore Microfinance{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+
+<!-- Welcome Header -->
+<div class="mb-8">
+    <h1 class="text-3xl lg:text-4xl font-bold text-gray-900 dark:text-white mb-2">
+        Welcome back, <span class="text-primary-600 dark:text-primary-400 capitalize">{{ user.first_name|default:"User" }}</span>.
+    </h1>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <p class="text-gray-600 dark:text-gray-400">
+            Here's what's happening with your portfolio today.
+        </p>
+        <div class="flex items-center space-x-1 text-sm">
+            <span class="text-gray-500 dark:text-gray-500">
+                <i class="fas fa-building mr-1 text-primary-600"></i>
+                {{ user.branch.name }}
+            </span>
+            <span class="text-gray-500 dark:text-gray-500">
+                Last login: <span class="font-medium">{{ user.last_login|date:"M d, Y H:i" }}</span>
+            </span>
+        </div>
+    </div>
+</div>
+
+<!-- Alerts Section -->
+{% if alerts %}
+<div class="mb-8 space-y-3">
+    {% for alert in alerts %}
+    <div class="flex items-center justify-between p-4 rounded-2xl 
+                {% if alert.type == 'error' %}bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500
+                {% elif alert.type == 'warning' %}bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-500
+                {% elif alert.type == 'success' %}bg-green-50 dark:bg-green-900/20 border-l-4 border-green-500
+                {% else %}bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500{% endif %}">
+        <div class="flex items-center space-x-3">
+            <span class="text-2xl">{{ alert.icon }}</span>
+            <p class="font-medium 
+                      {% if alert.type == 'error' %}text-red-800 dark:text-red-200
+                      {% elif alert.type == 'warning' %}text-yellow-800 dark:text-yellow-200
+                      {% elif alert.type == 'success' %}text-green-800 dark:text-green-200
+                      {% else %}text-blue-800 dark:text-blue-200{% endif %}">
+                {{ alert.message }}
+            </p>
+        </div>
+        <a href="{{ alert.action_url }}" 
+           class="px-4 py-2 rounded-lg font-semibold text-sm transition-colors
+                  {% if alert.type == 'error' %}bg-red-600 hover:bg-red-700 text-white
+                  {% elif alert.type == 'warning' %}bg-yellow-600 hover:bg-yellow-700 text-white
+                  {% elif alert.type == 'success' %}bg-green-600 hover:bg-green-700 text-white
+                  {% else %}bg-blue-600 hover:bg-blue-700 text-white{% endif %}">
+            {{ alert.action_text }}
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Main Stats Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+    
+    <!-- Hero Card - Total Portfolio Outstanding (2 columns on desktop) -->
+    <div class="lg:col-span-2 bg-gradient-to-br from-primary-500 to-primary-700 rounded-3xl p-8 text-white shadow-2xl shadow-primary-500/30 relative overflow-hidden">
+        <!-- Background Pattern -->
+        <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32"></div>
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full -ml-24 -mb-24"></div>
+        
+        <div class="relative z-10">
+            <div class="flex items-start justify-between mb-6">
+                <div class="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center">
+                    <i class="fas fa-wallet text-3xl"></i>
+                </div>
+                <div class="text-right">
+                    <div class="text-primary-100 text-sm mb-1">Portfolio at Risk</div>
+                    <div class="text-2xl font-bold {% if loan_stats.portfolio_at_risk_pct > 10 %}text-red-300{% else %}text-white{% endif %}">
+                        {{ loan_stats.portfolio_at_risk_pct|floatformat:1|intcomma }}%
+                    </div>
+                </div>
+            </div>
+            
+            <p class="text-primary-100 text-sm font-medium mb-2">Total Outstanding Portfolio</p>
+            <h2 class="text-5xl font-bold mb-2">₦{{ loan_stats.total_outstanding|floatformat:0|intcomma }}</h2>
+            <p class="text-primary-100 text-sm">Across {{ loan_stats.active }} active loans</p>
+            
+            <div class="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-white/20">
+                <div>
+                    <p class="text-primary-100 text-xs mb-1">Disbursed</p>
+                    <p class="text-xl font-bold">₦{{ loan_stats.total_disbursed|floatformat:0|intcomma }}</p>
+                </div>
+                <div>
+                    <p class="text-primary-100 text-xs mb-1">Collected</p>
+                    <p class="text-xl font-bold">₦{{ loan_stats.total_collected|floatformat:0|intcomma }}</p>
+                </div>
+                <div>
+                    <p class="text-primary-100 text-xs mb-1">Overdue</p>
+                    <p class="text-xl font-bold {% if loan_stats.overdue > 0 %}text-red-300{% endif %}">{{ loan_stats.overdue }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Today's Collections -->
+    <div class="bg-white dark:bg-gray-800 rounded-3xl p-6 shadow-lg border border-gray-100 dark:border-gray-700">
+        <div class="flex items-start justify-between mb-4">
+            <div class="w-14 h-14 bg-green-100 dark:bg-green-900/30 rounded-2xl flex items-center justify-center">
+                <i class="fas fa-hand-holding-usd text-green-600 dark:text-green-400 text-2xl"></i>
+            </div>
+        </div>
+        <p class="text-gray-600 dark:text-gray-400 text-sm font-medium mb-1">Today's Collections</p>
+        <h3 class="text-3xl font-bold text-gray-900 dark:text-white mb-1">₦{{ transaction_stats.today_repayments|floatformat:0|intcomma }}</h3>
+        <p class="text-gray-500 dark:text-gray-500 text-xs">{{ transaction_stats.today_count }} transactions</p>
+    </div>
+    
+</div>
+
+<!-- Today's Operations - 4 Cards -->
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+    
+    <!-- Today's Deposits -->
+    <div class="bg-white dark:bg-gray-800 rounded-3xl p-6 shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl transition-shadow">
+        <div class="flex items-start justify-between mb-4">
+            <div class="w-14 h-14 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center">
+                <i class="fas fa-arrow-down text-blue-600 dark:text-blue-400 text-2xl"></i>
+            </div>
+        </div>
+        <p class="text-gray-600 dark:text-gray-400 text-sm font-medium mb-1">Today's Deposits</p>
+        <h3 class="text-2xl font-bold text-gray-900 dark:text-white mb-1">₦{{ transaction_stats.today_deposits|floatformat:0|intcomma }}</h3>
+        <p class="text-gray-500 dark:text-gray-500 text-xs">Savings deposits</p>
+    </div>
+    
+    <!-- Today's Withdrawals -->
+    <div class="bg-white dark:bg-gray-800 rounded-3xl p-6 shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl transition-shadow">
+        <div class="flex items-start justify-between mb-4">
+            <div class="w-14 h-14 bg-orange-100 dark:bg-orange-900/30 rounded-2xl flex items-center justify-center">
+                <i class="fas fa-arrow-up text-orange-600 dark:text-orange-400 text-2xl"></i>
+            </div>
+        </div>
+        <p class="text-gray-600 dark:text-gray-400 text-sm font-medium mb-1">Today's Withdrawals</p>
+        <h3 class="text-2xl font-bold text-gray-900 dark:text-white mb-1">₦{{ transaction_stats.today_withdrawals|floatformat:0|intcomma }}</h3>
+        <p class="text-gray-500 dark:text-gray-500 text-xs">Savings withdrawals</p>
+    </div>
+    
+    <!-- Pending Approvals -->
+    <div class="bg-white dark:bg-gray-800 rounded-3xl p-6 shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl transition-shadow">
+        <div class="flex items-start justify-between mb-4">
+            <div class="w-14 h-14 bg-purple-100 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center">
+                <i class="fas fa-clock text-purple-600 dark:text-purple-400 text-2xl"></i>
+            </div>
+        </div>
+        <p class="text-gray-600 dark:text-gray-400 text-sm font-medium mb-1">Pending Approvals</p>
+        <h3 class="text-2xl font-bold text-gray-900 dark:text-white mb-1">{{ pending_items.loans|default:0 }}</h3>
+        <p class="text-gray-500 dark:text-gray-500 text-xs">Loans awaiting approval</p>
+    </div>
+    
+    <!-- Total Active Clients -->
+    <div class="bg-white dark:bg-gray-800 rounded-3xl p-6 shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl transition-shadow">
+        <div class="flex items-start justify-between mb-4">
+            <div class="w-14 h-14 bg-pink-100 dark:bg-pink-900/30 rounded-2xl flex items-center justify-center">
+                <i class="fas fa-users text-pink-600 dark:text-pink-400 text-2xl"></i>
+            </div>
+        </div>
+        <p class="text-gray-600 dark:text-gray-400 text-sm font-medium mb-1">Active Clients</p>
+        <h3 class="text-2xl font-bold text-gray-900 dark:text-white mb-1">{{ client_stats.active }}</h3>
+        <p class="text-gray-500 dark:text-gray-500 text-xs">+{{ client_stats.new_this_month }} this month</p>
+    </div>
+    
+</div>
+
+<!-- Quick Actions -->
+<div class="mb-8">
+    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Quick Actions</h3>
+    
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        
+        <!-- Register Client -->
+        <a
+        href="{% url 'core:client_create' %}"
+        class="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl hover:scale-105 transition-all group">
+            <div class="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                <i class="fas fa-user-plus text-blue-600 dark:text-blue-400 text-2xl"></i>
+            </div>
+            <p class="text-sm font-semibold text-gray-900 dark:text-white text-center">Register Client</p>
+        </a>
+
+        <!-- New Loan -->
+        <a href="{% url 'core:loan_create' %}" class="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl hover:scale-105 transition-all group">
+            <div class="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                <i class="fas fa-plus-circle text-green-600 dark:text-green-400 text-2xl"></i>
+            </div>
+            <p class="text-sm font-semibold text-gray-900 dark:text-white text-center">New Loan</p>
+        </a>
+
+        <!-- Collect Payment -->
+         <!-- -->
+        <a 
+        href="" 
+        class="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl hover:scale-105 transition-all group">
+            <div class="w-16 h-16 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                <i class="fas fa-hand-holding-usd text-purple-600 dark:text-purple-400 text-2xl"></i>
+            </div>
+            <p class="text-sm font-semibold text-gray-900 dark:text-white text-center">Collect Payment</p>
+        </a>
+
+        <!-- Disburse Loan -->
+        <a href="{% url 'core:loan_list' %}?status=approved" class="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl hover:scale-105 transition-all group">
+            <div class="w-16 h-16 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                <i class="fas fa-money-bill-wave text-orange-600 dark:text-orange-400 text-2xl"></i>
+            </div>
+            <p class="text-sm font-semibold text-gray-900 dark:text-white text-center">Disburse Loan</p>
+        </a>
+
+        <!-- Approve Loans -->
+        {% if pending_items.loans %}
+        <a href="{% url 'core:loan_list' %}?status=pending_approval" class="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl hover:scale-105 transition-all group relative">
+            <div class="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                {{ pending_items.loans }}
+            </div>
+            <div class="w-16 h-16 bg-pink-100 dark:bg-pink-900/30 rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                <i class="fas fa-check-circle text-pink-600 dark:text-pink-400 text-2xl"></i>
+            </div>
+            <p class="text-sm font-semibold text-gray-900 dark:text-white text-center">Approve Loans</p>
+        </a>
+        {% endif %}
+
+        <!-- Reports -->
+        <a href="{% url 'core:accounting_dashboard' %}" class="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 hover:shadow-xl hover:scale-105 transition-all group">
+            <div class="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                <i class="fas fa-chart-bar text-indigo-600 dark:text-indigo-400 text-2xl"></i>
+            </div>
+            <p class="text-sm font-semibold text-gray-900 dark:text-white text-center">Reports</p>
+        </a>
+        
+    </div>
+</div>
+
+<!-- Bottom Section -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    
+    <!-- Recent Loans (2 columns) -->
+    <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-3xl p-6 shadow-lg border border-gray-100 dark:border-gray-700">
+        <div class="flex items-center justify-between mb-6">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white">Recent Loan Applications</h3>
+            <a href="{% url 'core:loan_list' %}" class="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-semibold text-sm flex items-center">
+                View all <i class="fas fa-arrow-right ml-2"></i>
+            </a>
+        </div>
+        
+        {% if recent_loans %}
+            <div class="space-y-3">
+                {% for loan in recent_loans %}
+                <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    <div class="flex items-center space-x-4">
+                        <div class="w-12 h-12 rounded-xl 
+                                    {% if loan.status == 'active' or loan.status == 'disbursed' %}bg-green-100 dark:bg-green-900/30
+                                    {% elif loan.status == 'pending_approval' %}bg-yellow-100 dark:bg-yellow-900/30
+                                    {% elif loan.status == 'overdue' %}bg-red-100 dark:bg-red-900/30
+                                    {% else %}bg-blue-100 dark:bg-blue-900/30{% endif %} 
+                                    flex items-center justify-center">
+                            <i class="fas fa-file-invoice-dollar
+                                      {% if loan.status == 'active' or loan.status == 'disbursed' %}text-green-600 dark:text-green-400
+                                      {% elif loan.status == 'pending_approval' %}text-yellow-600 dark:text-yellow-400
+                                      {% elif loan.status == 'overdue' %}text-red-600 dark:text-red-400
+                                      {% else %}text-blue-600 dark:text-blue-400{% endif %}"></i>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-gray-900 dark:text-white">{{ loan.client.get_full_name }}</p>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">
+                                {{ loan.get_status_display }} • {{ loan.loan_product.name }}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-bold text-gray-900 dark:text-white">₦{{ loan.principal_amount|floatformat:0|intcomma }}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">{{ loan.created_at|date:"M d" }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="flex flex-col items-center justify-center py-12">
+                <div class="w-24 h-24 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
+                    <i class="fas fa-file-invoice-dollar text-gray-400 dark:text-gray-500 text-4xl"></i>
+                </div>
+                <p class="text-gray-500 dark:text-gray-400 font-medium">No recent loans</p>
+            </div>
+        {% endif %}
+    </div>
+    
+    <!-- Branch Performance (if admin/director) -->
+    <div class="space-y-6">
+        
+        {% if branch_stats %}
+        <div class="bg-white dark:bg-gray-800 rounded-3xl p-6 shadow-lg border border-gray-100 dark:border-gray-700">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-gray-900 dark:text-white">Top Branches</h3>
+                <a href="{% url 'core:branch_list' %}" class="text-primary-600 dark:text-primary-400 text-sm font-semibold">View all</a>
+            </div>
+            
+            <div class="space-y-3">
+                {% for branch_stat in branch_stats %}
+                <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 bg-primary-100 dark:bg-primary-900/30 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-building text-primary-600 dark:text-primary-400"></i>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-sm text-gray-900 dark:text-white">{{ branch_stat.branch.name }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ branch_stat.client_count }} clients • {{ branch_stat.loan_count }} loans</p>
+                        </div>
+                    </div>
+                    <p class="text-sm font-bold text-gray-900 dark:text-white">₦{{ branch_stat.portfolio|floatformat:0|intcomma }}</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+    </div>
+    
+</div>
+
+{% endblock %}

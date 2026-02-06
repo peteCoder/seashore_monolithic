@@ -1,0 +1,734 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %}
+{% if is_create %}Register New Client{% else %}Edit Client{% endif %} - Seashore Microfinance
+{% endblock %}
+
+{% block content %}
+<div x-data="clientFormApp()" x-cloak>
+    <!-- Header -->
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+            {% if is_create %}Register New Client{% else %}Edit Client: {{ client.get_full_name }}{% endif %}
+        </h1>
+        <p class="text-gray-600 dark:text-gray-400">
+            {% if is_create %}Complete all required fields across the 5 tabs{% else %}Update client information{% endif %}
+        </p>
+    </div>
+
+    <!-- Progress Indicator -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
+        <div class="flex items-center justify-between">
+            <template x-for="(tab, index) in tabs" :key="index">
+                <div class="flex-1 relative flex items-center">
+                    <div class="flex items-center justify-center w-full">
+                        <div class="rounded-full transition duration-500 ease-in-out h-12 w-12 flex items-center justify-center border-2"
+                             :class="{
+                                 'bg-primary-600 border-primary-600 text-white': currentTab === index,
+                                 'bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400': currentTab !== index
+                             }">
+                            <span x-text="index + 1"></span>
+                        </div>
+                    </div>
+                    <div x-show="index < tabs.length - 1" class="flex-1 h-0.5 mx-2"
+                         :class="{
+                             'bg-primary-600': currentTab > index,
+                             'bg-gray-300 dark:bg-gray-600': currentTab <= index
+                         }">
+                    </div>
+                    <div class="absolute top-14 left-1/2 transform -translate-x-1/2 text-xs font-medium text-center whitespace-nowrap"
+                         :class="{
+                             'text-primary-600 dark:text-primary-400': currentTab === index,
+                             'text-gray-500 dark:text-gray-400': currentTab !== index
+                         }"
+                         x-text="tab.name">
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Form -->
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        <!-- All Form Errors Summary (visible immediately) -->
+        {% if form.errors %}
+        <div class="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 mb-6 rounded-r-lg">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <i class="fas fa-exclamation-triangle text-red-400 text-lg"></i>
+                </div>
+                <div class="ml-3">
+                    <h3 class="text-sm font-semibold text-red-800 dark:text-red-300">
+                        Please correct the error{{ form.errors|length|pluralize }} below:
+                    </h3>
+                    <ul class="mt-2 text-sm text-red-700 dark:text-red-300 list-disc list-inside space-y-1">
+                        {% for field in form %}
+                            {% for error in field.errors %}
+                            <li><strong>{{ field.label }}:</strong> {{ error }}</li>
+                            {% endfor %}
+                        {% endfor %}
+                        {% for error in form.non_field_errors %}
+                        <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tab Content Container -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
+
+            <!-- Tab 1: Personal Information -->
+            <div x-show="currentTab === 0" x-transition>
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Personal Information</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- First Name -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            First Name <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.first_name }}
+                        {% if form.first_name.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.first_name.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Last Name -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Last Name <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.last_name }}
+                        {% if form.last_name.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.last_name.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Nickname -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Nickname
+                        </label>
+                        {{ form.nickname }}
+                        {% if form.nickname.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.nickname.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Email -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Email Address <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.email }}
+                        {% if form.email.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.email.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Phone -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Phone Number <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.phone }}
+                        {% if form.phone.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.phone.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Alternate Phone -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Alternate Phone
+                        </label>
+                        {{ form.alternate_phone }}
+                        {% if form.alternate_phone.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.alternate_phone.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Date of Birth -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Date of Birth <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.date_of_birth }}
+                        {% if form.date_of_birth.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.date_of_birth.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Gender -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Gender <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.gender }}
+                        {% if form.gender.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.gender.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Marital Status -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Marital Status
+                        </label>
+                        {{ form.marital_status }}
+                        {% if form.marital_status.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.marital_status.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Number of Dependents -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Number of Dependents
+                        </label>
+                        {{ form.number_of_dependents }}
+                        {% if form.number_of_dependents.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.number_of_dependents.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Education Level -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Education Level
+                        </label>
+                        {{ form.education_level }}
+                        {% if form.education_level.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.education_level.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 2: Contact & Address -->
+            <div x-show="currentTab === 1" x-transition>
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Contact & Address</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Address -->
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Residential Address <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.address }}
+                        {% if form.address.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.address.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- City -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            City <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.city }}
+                        {% if form.city.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.city.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- State -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            State <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.state }}
+                        {% if form.state.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.state.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Postal Code -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Postal Code
+                        </label>
+                        {{ form.postal_code }}
+                        {% if form.postal_code.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.postal_code.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Country -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Country
+                        </label>
+                        {{ form.country }}
+                        {% if form.country.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.country.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Landmark -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Nearest Landmark
+                        </label>
+                        {{ form.landmark }}
+                        {% if form.landmark.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.landmark.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Location -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Location Type
+                        </label>
+                        {{ form.location }}
+                        {% if form.location.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.location.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Residential Status -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Residential Status
+                        </label>
+                        {{ form.residential_status }}
+                        {% if form.residential_status.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.residential_status.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Union Location -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Union Location
+                        </label>
+                        {{ form.union_location }}
+                        {% if form.union_location.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.union_location.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 3: Identification & Documents -->
+            <div x-show="currentTab === 2" x-transition>
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Identification & Documents</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- ID Type -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            ID Type <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.id_type }}
+                        {% if form.id_type.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.id_type.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- ID Number -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            ID Number <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.id_number }}
+                        {% if form.id_number.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.id_number.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- BVN -->
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Bank Verification Number (BVN)
+                        </label>
+                        {{ form.bvn }}
+                        {% if form.bvn.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.bvn.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Profile Picture -->
+                    <div class="md:col-span-2" x-data="{ preview: '{% if client.profile_picture %}{{ client.profile_picture.url }}{% endif %}' }">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Profile Picture
+                        </label>
+                        <input type="file"
+                               name="profile_picture"
+                               accept="image/*"
+                               @change="if ($event.target.files[0]) { preview = URL.createObjectURL($event.target.files[0]) }"
+                               class="block w-full text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none">
+                        <div x-show="preview" class="mt-2">
+                            <img :src="preview" class="h-32 w-32 object-cover rounded-lg border border-gray-300 dark:border-gray-600">
+                        </div>
+                    </div>
+
+                    <!-- ID Card Front -->
+                    <div x-data="{ preview: '{% if client.id_card_front %}{{ client.id_card_front.url }}{% endif %}' }">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            ID Card (Front)
+                        </label>
+                        <input type="file"
+                               name="id_card_front"
+                               accept="image/*"
+                               @change="if ($event.target.files[0]) { preview = URL.createObjectURL($event.target.files[0]) }"
+                               class="block w-full text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none">
+                        <div x-show="preview" class="mt-2">
+                            <img :src="preview" class="h-32 w-48 object-cover rounded-lg border border-gray-300 dark:border-gray-600">
+                        </div>
+                    </div>
+
+                    <!-- ID Card Back -->
+                    <div x-data="{ preview: '{% if client.id_card_back %}{{ client.id_card_back.url }}{% endif %}' }">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            ID Card (Back)
+                        </label>
+                        <input type="file"
+                               name="id_card_back"
+                               accept="image/*"
+                               @change="if ($event.target.files[0]) { preview = URL.createObjectURL($event.target.files[0]) }"
+                               class="block w-full text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none">
+                        <div x-show="preview" class="mt-2">
+                            <img :src="preview" class="h-32 w-48 object-cover rounded-lg border border-gray-300 dark:border-gray-600">
+                        </div>
+                    </div>
+
+                    <!-- Signature -->
+                    <div class="md:col-span-2" x-data="{ preview: '{% if client.signature %}{{ client.signature.url }}{% endif %}' }">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Signature
+                        </label>
+                        <input type="file"
+                               name="signature"
+                               accept="image/*"
+                               @change="if ($event.target.files[0]) { preview = URL.createObjectURL($event.target.files[0]) }"
+                               class="block w-full text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none">
+                        <div x-show="preview" class="mt-2">
+                            <img :src="preview" class="h-24 w-48 object-cover rounded-lg border border-gray-300 dark:border-gray-600">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 4: Employment & Business -->
+            <div x-show="currentTab === 3" x-transition>
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Employment & Business Information</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Occupation -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Occupation
+                        </label>
+                        {{ form.occupation }}
+                        {% if form.occupation.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.occupation.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Employer -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Employer
+                        </label>
+                        {{ form.employer }}
+                        {% if form.employer.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.employer.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Monthly Income -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Monthly Income (₦)
+                        </label>
+                        {{ form.monthly_income }}
+                        {% if form.monthly_income.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.monthly_income.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Years in Business -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Years in Business
+                        </label>
+                        {{ form.years_in_business }}
+                        {% if form.years_in_business.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.years_in_business.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Business Name -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Business Name
+                        </label>
+                        {{ form.business_name }}
+                        {% if form.business_name.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.business_name.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Business Type -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Business Type
+                        </label>
+                        {{ form.business_type }}
+                        {% if form.business_type.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.business_type.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Business Type 2 -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Secondary Business Type
+                        </label>
+                        {{ form.business_type_2 }}
+                        {% if form.business_type_2.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.business_type_2.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Business Landmark -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Business Landmark
+                        </label>
+                        {{ form.business_landmark }}
+                        {% if form.business_landmark.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.business_landmark.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Business Location -->
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Business Location
+                        </label>
+                        {{ form.business_location }}
+                        {% if form.business_location.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.business_location.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Business Address -->
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Business Address
+                        </label>
+                        {{ form.business_address }}
+                        {% if form.business_address.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.business_address.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 5: Banking & Emergency Contact -->
+            <div x-show="currentTab === 4" x-transition>
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Banking & Emergency Contact</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Banking Section -->
+                    <div class="md:col-span-2">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Banking Details</h3>
+                    </div>
+
+                    <!-- Account Number -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Account Number
+                        </label>
+                        {{ form.account_number }}
+                        {% if form.account_number.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.account_number.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Bank Name -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Bank Name
+                        </label>
+                        {{ form.bank_name }}
+                        {% if form.bank_name.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.bank_name.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Emergency Contact Section -->
+                    <div class="md:col-span-2 mt-6">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Emergency Contact</h3>
+                    </div>
+
+                    <!-- Emergency Contact Name -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Contact Name
+                        </label>
+                        {{ form.emergency_contact_name }}
+                        {% if form.emergency_contact_name.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.emergency_contact_name.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Emergency Contact Phone -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Contact Phone
+                        </label>
+                        {{ form.emergency_contact_phone }}
+                        {% if form.emergency_contact_phone.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.emergency_contact_phone.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Emergency Contact Relationship -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Relationship
+                        </label>
+                        {{ form.emergency_contact_relationship }}
+                        {% if form.emergency_contact_relationship.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.emergency_contact_relationship.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Emergency Contact Address -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Contact Address
+                        </label>
+                        {{ form.emergency_contact_address }}
+                        {% if form.emergency_contact_address.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.emergency_contact_address.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Branch & Group Section -->
+                    <div class="md:col-span-2 mt-6">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Branch & Group Assignment</h3>
+                    </div>
+
+                    <!-- Branch -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Branch <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.branch }}
+                        {% if form.branch.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.branch.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Group -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Group
+                        </label>
+                        {{ form.group }}
+                        {% if form.group.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.group.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Group Role -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Group Role
+                        </label>
+                        {{ form.group_role }}
+                        {% if form.group_role.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.group_role.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Origin Channel -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Origin Channel
+                        </label>
+                        {{ form.origin_channel }}
+                        {% if form.origin_channel.errors %}
+                        <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.origin_channel.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Navigation Buttons -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6">
+            <div class="flex items-center justify-between">
+                <button type="button"
+                        @click="previousTab()"
+                        x-show="currentTab > 0"
+                        class="px-6 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                    <i class="fas fa-arrow-left mr-2"></i>
+                    Previous
+                </button>
+
+                <div class="ml-auto flex space-x-3">
+                    <a href="{% if is_create %}{% url 'core:client_list' %}{% else %}{% url 'core:client_detail' client.id %}{% endif %}"
+                       class="px-6 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                        Cancel
+                    </a>
+
+                    <button type="button"
+                            @click="nextTab()"
+                            x-show="currentTab < tabs.length - 1"
+                            class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold transition-colors">
+                        Next
+                        <i class="fas fa-arrow-right ml-2"></i>
+                    </button>
+
+                    <button type="submit"
+                            x-show="currentTab === tabs.length - 1"
+                            class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold transition-colors">
+                        <i class="fas fa-save mr-2"></i>
+                        {% if is_create %}Register Client{% else %}Update Client{% endif %}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+function clientFormApp() {
+    return {
+        currentTab: 0,
+        tabs: [
+            { name: 'Personal Info' },
+            { name: 'Contact & Address' },
+            { name: 'Identification' },
+            { name: 'Employment' },
+            { name: 'Banking & Emergency' }
+        ],
+
+        nextTab() {
+            if (this.currentTab < this.tabs.length - 1) {
+                this.currentTab++;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        },
+
+        previousTab() {
+            if (this.currentTab > 0) {
+                this.currentTab--;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
+    }
+}
+</script>
+{% endblock %}

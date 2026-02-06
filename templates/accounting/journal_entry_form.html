@@ -1,0 +1,124 @@
+{% extends 'layouts/base.html' %}
+
+{% load humanize %}
+
+{% block content %}
+<div class="p-6 max-w-6xl mx-auto">
+    <h1 class="text-2xl font-bold mb-6">Create Manual Journal Entry</h1>
+
+    {% if form.errors or formset.errors or formset.non_form_errors %}
+    <div class="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+        <h3 class="text-red-800 dark:text-red-200 font-semibold mb-2">
+            <i class="fas fa-exclamation-circle mr-2"></i>Please correct the errors below:
+        </h3>
+        <ul class="list-disc list-inside text-red-700 dark:text-red-300 text-sm space-y-1">
+            {% for field, errors in form.errors.items %}
+                {% for error in errors %}
+                <li><strong>{{ field }}:</strong> {{ error }}</li>
+                {% endfor %}
+            {% endfor %}
+            {% if formset.non_form_errors %}
+                {% for error in formset.non_form_errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            {% endif %}
+            {% for form_errors in formset.errors %}
+                {% if form_errors %}
+                    {% for field, errors in form_errors.items %}
+                        {% for error in errors %}
+                        <li><strong>Journal Line Error:</strong> {{ error }}</li>
+                        {% endfor %}
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <form method="post" id="journalForm">
+            {% csrf_token %}
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {{ form.as_p }}
+            </div>
+
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-4">Journal Lines</h3>
+                <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4">
+                    <p class="text-sm text-blue-800 dark:text-blue-200">
+                        <i class="fas fa-info-circle mr-2"></i><strong>Important Rules:</strong>
+                    </p>
+                    <ul class="text-sm text-blue-700 dark:text-blue-300 list-disc list-inside mt-2 space-y-1">
+                        <li>Minimum 2 lines required</li>
+                        <li>Each line must have EITHER debit OR credit (not both)</li>
+                        <li>Total Debits must equal Total Credits</li>
+                        <li>Leave debit/credit blank or enter 0 for the unused column</li>
+                    </ul>
+                </div>
+
+                {{ formset.management_form }}
+
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead class="bg-gray-50 dark:bg-gray-700">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium uppercase">Account</th>
+                                <th class="px-4 py-2 text-right text-xs font-medium uppercase">Debit</th>
+                                <th class="px-4 py-2 text-right text-xs font-medium uppercase">Credit</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium uppercase">Description</th>
+                                <th class="px-4 py-2 text-center text-xs font-medium uppercase">Delete</th>
+                            </tr>
+                        </thead>
+                        <tbody id="formset-body">
+                            {% for form in formset %}
+                            <tr class="border-b dark:border-gray-700">
+                                <td class="px-4 py-2">{{ form.account }}</td>
+                                <td class="px-4 py-2">{{ form.debit_amount }}</td>
+                                <td class="px-4 py-2">{{ form.credit_amount }}</td>
+                                <td class="px-4 py-2">{{ form.description }}</td>
+                                <td class="px-4 py-2 text-center">{{ form.DELETE }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot class="bg-gray-50 dark:bg-gray-700 font-bold">
+                            <tr>
+                                <td class="px-4 py-3 text-right">TOTALS:</td>
+                                <td class="px-4 py-3 text-right text-green-600" id="totalDebits">₦0.00</td>
+                                <td class="px-4 py-3 text-right text-red-600" id="totalCredits">₦0.00</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-3 pt-6 border-t">
+                <a href="{% url 'core:journal_entry_list' %}" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50">
+                    Cancel
+                </a>
+                <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700">
+                    Save as Draft
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// Simple balance calculation
+function updateTotals() {
+    let totalDebits = 0, totalCredits = 0;
+    document.querySelectorAll('.debit-input').forEach(input => {
+        totalDebits += parseFloat(input.value) || 0;
+    });
+    document.querySelectorAll('.credit-input').forEach(input => {
+        totalCredits += parseFloat(input.value) || 0;
+    });
+    document.getElementById('totalDebits').textContent = '₦' + totalDebits.toFixed(2);
+    document.getElementById('totalCredits').textContent = '₦' + totalCredits.toFixed(2);
+}
+
+document.getElementById('journalForm').addEventListener('input', updateTotals);
+</script>
+{% endblock %}
