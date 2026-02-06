@@ -7,8 +7,6 @@ Beautiful PDF generation for accounting reports
 
 from django.template.loader import render_to_string
 from django.http import HttpResponse
-from weasyprint import HTML, CSS
-from weasyprint.text.fonts import FontConfiguration
 import io
 
 
@@ -24,6 +22,20 @@ def render_to_pdf(template_name, context, filename='report.pdf'):
     Returns:
         HttpResponse with PDF content
     """
+    # Lazy import - only load when function is called
+    try:
+        from weasyprint import HTML, CSS
+        from weasyprint.text.fonts import FontConfiguration
+    except (ImportError, OSError) as e:
+        # Fallback for Vercel/environments without system dependencies
+        return HttpResponse(
+            f"PDF generation is not available in this environment. "
+            f"This feature requires deployment on a platform with full system library support. "
+            f"Error: {str(e)}",
+            status=503,
+            content_type='text/plain'
+        )
+    
     # Render HTML template
     html_string = render_to_string(template_name, context)
 
@@ -263,3 +275,6 @@ def generate_transaction_audit_pdf(report_data, form_data=None):
     from datetime import datetime
     filename = f'transaction_audit_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
     return render_to_pdf('accounting/pdf/transaction_audit_pdf.html', context, filename)
+
+
+

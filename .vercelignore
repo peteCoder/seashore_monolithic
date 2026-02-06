@@ -15,3 +15,9 @@ venv/**/**/
 
 __pycache__
 
+Dockerfile
+*.pyc
+__pycache__/
+.env
+.git/
+
