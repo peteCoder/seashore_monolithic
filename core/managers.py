@@ -78,10 +78,6 @@ class ClientQuerySet(BranchFilteredQuerySet, ActiveInactiveQuerySet, ApprovalQue
         """Clients who paid registration fee"""
         return self.filter(registration_fee_paid=True)
     
-    def by_level(self, level):
-        """Filter by client level"""
-        return self.filter(level=level)
-    
     def with_loans(self):
         """Clients with at least one loan"""
         return self.filter(loans__isnull=False).distinct()

@@ -301,6 +301,11 @@ class ClientCreateForm(forms.ModelForm):
         self.fields['group'].queryset = ClientGroup.objects.filter(is_active=True)
         self.fields['group'].empty_label = "Select a group (optional)"
 
+        # Profile picture and signature are required when creating a new client
+        if not (self.instance and self.instance.pk):
+            self.fields['profile_picture'].required = True
+            self.fields['signature'].required = True
+
     def clean_email(self):
         """Validate email uniqueness"""
         email = self.cleaned_data.get('email')
@@ -442,13 +447,6 @@ class ClientSearchForm(forms.Form):
         })
     )
 
-    level = forms.ChoiceField(
-        choices=[('', 'All Levels')] + Client.LEVEL_CHOICES,
-        required=False,
-        widget=forms.Select(attrs={
-            'class': 'px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-200',
-        })
-    )
 
 
 class ClientApprovalForm(forms.Form):

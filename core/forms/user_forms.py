@@ -154,6 +154,7 @@ class UserUpdateForm(forms.ModelForm):
             'branch',
             'is_active',
             'address',
+            'profile_picture',
         ]
         widgets = {
             'first_name': forms.TextInput(attrs={
@@ -186,11 +187,19 @@ class UserUpdateForm(forms.ModelForm):
                 'rows': 3,
                 'placeholder': 'Enter address...',
             }),
+            'profile_picture': forms.ClearableFileInput(attrs={
+                'class': 'block w-full text-sm text-gray-500 dark:text-gray-400 '
+                         'file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 '
+                         'file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 '
+                         'dark:file:bg-primary-900 dark:file:text-primary-300 '
+                         'hover:file:bg-primary-100 dark:hover:file:bg-primary-800',
+                'accept': 'image/*',
+            }),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Make all fields required except address
+        # Make all fields required except address and profile_picture
         self.fields['first_name'].required = True
         self.fields['last_name'].required = True
         self.fields['email'].required = True
@@ -198,6 +207,7 @@ class UserUpdateForm(forms.ModelForm):
         self.fields['user_role'].required = True
         self.fields['branch'].required = True
         self.fields['address'].required = False
+        self.fields['profile_picture'].required = False
 
 
 # =============================================================================

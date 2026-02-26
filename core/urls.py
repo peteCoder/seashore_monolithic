@@ -20,6 +20,14 @@ from core.views.client_views import (
     client_delete,
     client_assign_staff,
     client_pay_registration_fee,
+    client_statement,
+)
+from core.views.client_ajax_views import (
+    client_validate_tab,
+    client_create_ajax,
+    client_update_ajax,
+    client_savings_accounts,
+    client_details,
 )
 
 from core.views.branch_views import (
@@ -128,6 +136,11 @@ from core.views.accounting_views import (
     report_general_ledger,
     report_cash_flow,
     report_transaction_audit,
+    report_par_aging,
+    report_loan_officer_performance,
+    report_savings_maturity,
+    audit_log,
+    subsidiary_ledger,
 )
 
 from core.views.loan_views import (
@@ -147,6 +160,99 @@ from core.views.loan_views import (
     loan_add_guarantor,
     loan_edit_guarantor,
     loan_delete_guarantor,
+    loan_write_off,
+)
+
+from core.views.notification_views import (
+    notification_list,
+    notification_data,
+    notification_mark_read,
+    notification_mark_all_read,
+)
+
+from core.views.collateral_views import (
+    loan_collaterals,
+    loan_add_collateral,
+    loan_edit_collateral,
+    loan_verify_collateral,
+    loan_release_collateral,
+    loan_delete_collateral,
+)
+
+from core.views.loan_penalty_views import (
+    loan_penalties,
+    loan_add_penalty,
+    loan_waive_penalty,
+    loan_mark_penalty_paid,
+)
+
+from core.views.followup_views import (
+    followup_list,
+    loan_add_followup,
+    followup_update,
+    followup_complete,
+    followup_cancel,
+)
+
+from core.views.payment_promise_views import (
+    payment_promise_list,
+    loan_add_promise,
+    promise_update,
+    promise_update_status,
+)
+
+from core.views.restructure_views import (
+    restructure_list,
+    loan_restructure_request,
+    restructure_detail,
+    restructure_approve,
+    restructure_reject,
+)
+
+from core.views.assignment_views import (
+    assignment_list,
+    assignment_create,
+    assignment_detail,
+    assignment_approve,
+    assignment_reject,
+    assignment_cancel,
+)
+
+from core.views.reconciliation_views import (
+    reconciliation_list,
+    reconciliation_create,
+    reconciliation_detail,
+    reconciliation_add_line,
+    reconciliation_match,
+    reconciliation_complete,
+)
+
+from core.views.insurance_views import (
+    insurance_claim_list,
+    loan_file_insurance_claim,
+    insurance_claim_detail,
+    insurance_claim_review,
+    insurance_claim_record_payout,
+)
+
+from core.views.transfer_views import (
+    transfer_list,
+    transfer_create,
+    transfer_detail,
+    transfer_approve,
+    transfer_complete,
+)
+
+from core.views.import_views import (
+    import_clients,
+    import_loans,
+    import_savings,
+)
+
+from core.views.two_factor_views import (
+    verify_2fa,
+    setup_2fa,
+    disable_2fa,
 )
 
 
@@ -161,6 +267,10 @@ urlpatterns = [
     path('register/', register_view, name='register'),
     path('password-reset/', password_reset_request_view, name='password_reset_request'),
     path('reset-password/<str:token>/', password_reset_confirm_view, name='password_reset_confirm'),
+    # 2FA
+    path('verify-2fa/', verify_2fa, name='verify_2fa'),
+    path('setup-2fa/', setup_2fa, name='setup_2fa'),
+    path('disable-2fa/', disable_2fa, name='disable_2fa'),
 
     # =========================================================================
     # DASHBOARD
@@ -173,6 +283,11 @@ urlpatterns = [
     # =========================================================================
     path('clients/', client_list, name='client_list'),
     path('clients/create/', client_create, name='client_create'),
+    path('clients/ajax/validate-tab/', client_validate_tab, name='client_validate_tab'),
+    path('clients/ajax/create/', client_create_ajax, name='client_create_ajax'),
+    path('clients/ajax/savings-accounts/', client_savings_accounts, name='client_savings_accounts'),
+    path('clients/ajax/details/', client_details, name='client_details'),
+    path('clients/<uuid:client_id>/ajax/update/', client_update_ajax, name='client_update_ajax'),
     path('clients/<uuid:client_id>/', client_detail, name='client_detail'),
     path('clients/<uuid:client_id>/edit/', client_update, name='client_update'),
     path('clients/<uuid:client_id>/approve/', client_approve, name='client_approve'),
@@ -181,6 +296,8 @@ urlpatterns = [
     path('clients/<uuid:client_id>/delete/', client_delete, name='client_delete'),
     path('clients/<uuid:client_id>/assign-staff/', client_assign_staff, name='client_assign_staff'),
     path('clients/<uuid:client_id>/pay-registration-fee/', client_pay_registration_fee, name='client_pay_registration_fee'),
+    path('clients/<uuid:client_id>/statement/', client_statement, name='client_statement'),
+    path('clients/<uuid:client_id>/subsidiary-ledger/', subsidiary_ledger, name='subsidiary_ledger'),
 
     # =========================================================================
     # BRANCHES
@@ -297,6 +414,7 @@ urlpatterns = [
     path('loans/<uuid:loan_id>/pay-fees/', loan_pay_fees, name='loan_pay_fees'),
     path('loans/<uuid:loan_id>/approve/', loan_approve, name='loan_approve'),
     path('loans/<uuid:loan_id>/disburse/', loan_disburse, name='loan_disburse'),
+    path('loans/<uuid:loan_id>/write-off/', loan_write_off, name='loan_write_off'),
 
     # Loan Guarantors
     path('loans/<uuid:loan_id>/guarantors/', loan_guarantors, name='loan_guarantors'),
@@ -312,8 +430,72 @@ urlpatterns = [
     path('loans/repayments/<uuid:posting_id>/approve/', loan_repayment_approve, name='loan_repayment_approve'),
     path('loans/repayments/approve/bulk/', loan_repayment_approve_bulk, name='loan_repayment_approve_bulk'),
 
+    # Loan Collaterals
+    path('loans/<uuid:loan_id>/collaterals/', loan_collaterals, name='loan_collaterals'),
+    path('loans/<uuid:loan_id>/collaterals/add/', loan_add_collateral, name='loan_add_collateral'),
+    path('loans/<uuid:loan_id>/collaterals/<uuid:collateral_id>/edit/', loan_edit_collateral, name='loan_edit_collateral'),
+    path('loans/<uuid:loan_id>/collaterals/<uuid:collateral_id>/verify/', loan_verify_collateral, name='loan_verify_collateral'),
+    path('loans/<uuid:loan_id>/collaterals/<uuid:collateral_id>/release/', loan_release_collateral, name='loan_release_collateral'),
+    path('loans/<uuid:loan_id>/collaterals/<uuid:collateral_id>/delete/', loan_delete_collateral, name='loan_delete_collateral'),
+
+    # Loan Penalties
+    path('loans/<uuid:loan_id>/penalties/', loan_penalties, name='loan_penalties'),
+    path('loans/<uuid:loan_id>/penalties/add/', loan_add_penalty, name='loan_add_penalty'),
+    path('loans/<uuid:loan_id>/penalties/<uuid:penalty_id>/waive/', loan_waive_penalty, name='loan_waive_penalty'),
+    path('loans/<uuid:loan_id>/penalties/<uuid:penalty_id>/mark-paid/', loan_mark_penalty_paid, name='loan_mark_penalty_paid'),
+
+    # Loan Restructure Requests
+    path('loans/<uuid:loan_id>/restructure/request/', loan_restructure_request, name='loan_restructure_request'),
+
+    # Loan Follow-up Tasks
+    path('loans/<uuid:loan_id>/follow-ups/add/', loan_add_followup, name='loan_add_followup'),
+
+    # Loan Payment Promises
+    path('loans/<uuid:loan_id>/payment-promises/add/', loan_add_promise, name='loan_add_promise'),
+
     # Loan Product API
     path('api/loan-product/<uuid:product_id>/', loan_product_api, name='loan_product_api'),
+
+    # =========================================================================
+    # NOTIFICATIONS
+    # =========================================================================
+    path('notifications/', notification_list, name='notification_list'),
+    path('notifications/data/', notification_data, name='notification_data'),
+    path('notifications/<uuid:notification_id>/read/', notification_mark_read, name='notification_mark_read'),
+    path('notifications/read-all/', notification_mark_all_read, name='notification_mark_all_read'),
+
+    # =========================================================================
+    # FOLLOW-UP TASKS
+    # =========================================================================
+    path('follow-ups/', followup_list, name='followup_list'),
+    path('follow-ups/<uuid:task_id>/edit/', followup_update, name='followup_update'),
+    path('follow-ups/<uuid:task_id>/complete/', followup_complete, name='followup_complete'),
+    path('follow-ups/<uuid:task_id>/cancel/', followup_cancel, name='followup_cancel'),
+
+    # =========================================================================
+    # PAYMENT PROMISES
+    # =========================================================================
+    path('payment-promises/', payment_promise_list, name='payment_promise_list'),
+    path('payment-promises/<uuid:promise_id>/edit/', promise_update, name='promise_update'),
+    path('payment-promises/<uuid:promise_id>/update-status/', promise_update_status, name='promise_update_status'),
+
+    # =========================================================================
+    # LOAN RESTRUCTURE REQUESTS
+    # =========================================================================
+    path('restructures/', restructure_list, name='restructure_list'),
+    path('restructures/<uuid:request_id>/', restructure_detail, name='restructure_detail'),
+    path('restructures/<uuid:request_id>/approve/', restructure_approve, name='restructure_approve'),
+    path('restructures/<uuid:request_id>/reject/', restructure_reject, name='restructure_reject'),
+
+    # =========================================================================
+    # ASSIGNMENT REQUESTS
+    # =========================================================================
+    path('assignments/', assignment_list, name='assignment_list'),
+    path('assignments/create/', assignment_create, name='assignment_create'),
+    path('assignments/<uuid:request_id>/', assignment_detail, name='assignment_detail'),
+    path('assignments/<uuid:request_id>/approve/', assignment_approve, name='assignment_approve'),
+    path('assignments/<uuid:request_id>/reject/', assignment_reject, name='assignment_reject'),
+    path('assignments/<uuid:request_id>/cancel/', assignment_cancel, name='assignment_cancel'),
 
     # =========================================================================
     # ACCOUNTING MODULE
@@ -342,11 +524,44 @@ urlpatterns = [
     path('accounting/reports/general-ledger/', report_general_ledger, name='report_general_ledger'),
     path('accounting/reports/cash-flow/', report_cash_flow, name='report_cash_flow'),
     path('accounting/reports/transaction-audit/', report_transaction_audit, name='report_transaction_audit'),
+    path('accounting/reports/par-aging/', report_par_aging, name='report_par_aging'),
+    path('accounting/reports/loan-officer-performance/', report_loan_officer_performance, name='report_loan_officer_performance'),
+    path('accounting/reports/savings-maturity/', report_savings_maturity, name='report_savings_maturity'),
+    path('accounting/audit-log/', audit_log, name='audit_log'),
+
+    # =========================================================================
+    # BANK / CASH RECONCILIATION
+    # =========================================================================
+    path('accounting/reconciliation/', reconciliation_list, name='reconciliation_list'),
+    path('accounting/reconciliation/create/', reconciliation_create, name='reconciliation_create'),
+    path('accounting/reconciliation/<uuid:recon_id>/', reconciliation_detail, name='reconciliation_detail'),
+    path('accounting/reconciliation/<uuid:recon_id>/add-line/', reconciliation_add_line, name='reconciliation_add_line'),
+    path('accounting/reconciliation/<uuid:recon_id>/match/', reconciliation_match, name='reconciliation_match'),
+    path('accounting/reconciliation/<uuid:recon_id>/complete/', reconciliation_complete, name='reconciliation_complete'),
+
+    # =========================================================================
+    # LOAN INSURANCE CLAIMS
+    # =========================================================================
+    path('insurance/', insurance_claim_list, name='insurance_claim_list'),
+    path('loans/<uuid:loan_id>/insurance/file/', loan_file_insurance_claim, name='loan_file_insurance_claim'),
+    path('insurance/<uuid:claim_id>/', insurance_claim_detail, name='insurance_claim_detail'),
+    path('insurance/<uuid:claim_id>/review/', insurance_claim_review, name='insurance_claim_review'),
+    path('insurance/<uuid:claim_id>/payout/', insurance_claim_record_payout, name='insurance_claim_record_payout'),
+
+    # =========================================================================
+    # INTER-BRANCH TRANSFERS
+    # =========================================================================
+    path('transfers/', transfer_list, name='transfer_list'),
+    path('transfers/create/', transfer_create, name='transfer_create'),
+    path('transfers/<uuid:transfer_id>/', transfer_detail, name='transfer_detail'),
+    path('transfers/<uuid:transfer_id>/approve/', transfer_approve, name='transfer_approve'),
+    path('transfers/<uuid:transfer_id>/complete/', transfer_complete, name='transfer_complete'),
+
+    # =========================================================================
+    # BULK CSV IMPORTS
+    # =========================================================================
+    path('imports/clients/', import_clients, name='import_clients'),
+    path('imports/loans/',   import_loans,   name='import_loans'),
+    path('imports/savings/', import_savings, name='import_savings'),
 
 ]
-  
-
-
-
-
-

@@ -6,20 +6,20 @@
 {% block content %}
 <div x-data="{ selectedPostings: [] }">
     <!-- Header with Action Buttons -->
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
         <div>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ page_title }}</h1>
             <p class="text-gray-600 dark:text-gray-400">{{ summary.total_count }} total postings</p>
         </div>
 
-        <div class="flex items-center space-x-3">
+        <div class="flex flex-wrap items-center gap-3">
             <a href="{% url 'core:loan_repayment_post_bulk' %}"
-               class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors flex items-center space-x-2">
+               class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors flex items-center space-x-2">
                 <i class="fas fa-upload"></i>
                 <span>Bulk Post</span>
             </a>
             <a href="{% url 'core:loan_repayment_post' %}"
-               class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold transition-colors flex items-center space-x-2">
+               class="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold transition-colors flex items-center space-x-2">
                 <i class="fas fa-plus"></i>
                 <span>Post Repayment</span>
             </a>

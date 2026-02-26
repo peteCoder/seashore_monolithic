@@ -10,11 +10,14 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 from decimal import Decimal
 
-from core.models import Client, Transaction, CLIENT_REGISTRATION_FEE
+from core.models import Client, Transaction, CLIENT_REGISTRATION_FEE, CLIENT_REGISTRATION_FEE_BREAKDOWN, SavingsProduct, SavingsAccount
+from core.utils.accounting_helpers import post_fee_collection_journal
+from core.services.notification_service import notify, notify_role
 from core.forms.client_forms import (
     ClientCreateForm,
     ClientUpdateForm,
@@ -24,6 +27,30 @@ from core.forms.client_forms import (
     RegistrationFeePaymentForm,
 )
 from core.permissions import PermissionChecker
+
+
+# Maps each form field name to its tab index (0-based) in the 5-tab client form
+_CLIENT_FIELD_TAB = {
+    # Tab 0 — Personal Info
+    'first_name': 0, 'last_name': 0, 'nickname': 0, 'email': 0, 'phone': 0,
+    'alternate_phone': 0, 'date_of_birth': 0, 'gender': 0, 'marital_status': 0,
+    'number_of_dependents': 0, 'education_level': 0,
+    # Tab 1 — Contact & Address
+    'address': 1, 'city': 1, 'state': 1, 'postal_code': 1, 'country': 1,
+    'landmark': 1, 'location': 1, 'residential_status': 1, 'union_location': 1,
+    # Tab 2 — Identification & Documents
+    'id_type': 2, 'id_number': 2, 'bvn': 2, 'profile_picture': 2,
+    'id_card_front': 2, 'id_card_back': 2, 'signature': 2,
+    # Tab 3 — Employment & Business
+    'occupation': 3, 'employer': 3, 'monthly_income': 3, 'years_in_business': 3,
+    'business_name': 3, 'business_type': 3, 'business_type_2': 3,
+    'business_landmark': 3, 'business_location': 3, 'business_address': 3,
+    # Tab 4 — Banking & Emergency Contact
+    'account_number': 4, 'bank_name': 4, 'emergency_contact_name': 4,
+    'emergency_contact_phone': 4, 'emergency_contact_relationship': 4,
+    'emergency_contact_address': 4, 'branch': 4, 'group': 4,
+    'group_role': 4, 'origin_channel': 4,
+}
 
 
 # =============================================================================
@@ -73,10 +100,6 @@ def client_list(request):
         approval_status = search_form.cleaned_data.get('approval_status')
         if approval_status:
             clients = clients.filter(approval_status=approval_status)
-
-        level = search_form.cleaned_data.get('level')
-        if level:
-            clients = clients.filter(level=level)
 
     # Prefetch related data for performance
     clients = clients.select_related('branch', 'group', 'assigned_staff').order_by('-created_at')
@@ -202,6 +225,18 @@ def client_create(request):
 
             client.save()
 
+            # Notify branch manager of new client registration
+            branch = client.branch or request.user.branch
+            notify_role(
+                roles='manager',
+                branch=branch,
+                notification_type='client_registered',
+                title='New Client Registration',
+                message=f'A new client {client.get_full_name()} ({client.client_id}) has been registered and is pending approval.',
+                related_client=client,
+                exclude_user=request.user,
+            )
+
             messages.success(
                 request,
                 f'Client {client.get_full_name()} created successfully! Client ID: {client.client_id}'
@@ -212,10 +247,13 @@ def client_create(request):
     else:
         form = ClientCreateForm(user=request.user)
 
+    error_tab = min((_CLIENT_FIELD_TAB.get(f, 0) for f in form.errors), default=0)
+
     context = {
         'page_title': 'Register New Client',
         'form': form,
         'is_create': True,
+        'error_tab': error_tab,
     }
 
     return render(request, 'clients/form.html', context)
@@ -257,11 +295,14 @@ def client_update(request, client_id):
     else:
         form = ClientUpdateForm(instance=client, user=request.user)
 
+    error_tab = min((_CLIENT_FIELD_TAB.get(f, 0) for f in form.errors), default=0)
+
     context = {
         'page_title': f'Edit Client: {client.get_full_name()}',
         'form': form,
         'client': client,
         'is_create': False,
+        'error_tab': error_tab,
     }
 
     return render(request, 'clients/form.html', context)
@@ -299,29 +340,93 @@ def client_approve(request, client_id):
             notes = form.cleaned_data.get('notes', '')
 
             if action == 'approve':
-                client.approval_status = 'approved'
-                client.approved_by = request.user
-                client.approved_at = timezone.now()
-                client.save()
+                with transaction.atomic():
+                    client.approval_status = 'approved'
+                    client.approved_by = request.user
+                    client.approved_at = timezone.now()
+                    client.save()
 
-                messages.success(request, f'Client {client.get_full_name()} approved successfully!')
+                    # Auto-create savings accounts for each selected product
+                    selected_ids = request.POST.getlist('savings_product_ids')
+                    accounts_created = 0
+                    for pid in selected_ids:
+                        try:
+                            product = SavingsProduct.objects.get(id=pid, is_active=True)
+                            already_exists = SavingsAccount.objects.filter(
+                                client=client,
+                                savings_product=product,
+                                status__in=['pending', 'active'],
+                            ).exists()
+                            if not already_exists:
+                                SavingsAccount.objects.create(
+                                    client=client,
+                                    savings_product=product,
+                                    branch=client.branch,
+                                    status='pending',
+                                    is_auto_created=True,
+                                    notes=f'Auto-created during client approval by {request.user.get_full_name()}.',
+                                )
+                                accounts_created += 1
+                        except SavingsProduct.DoesNotExist:
+                            pass
+
+                if accounts_created:
+                    messages.success(
+                        request,
+                        f'Client {client.get_full_name()} approved and '
+                        f'{accounts_created} savings account(s) created successfully.',
+                    )
+                else:
+                    messages.success(request, f'Client {client.get_full_name()} approved successfully.')
+
+                if client.assigned_staff:
+                    notify(
+                        user=client.assigned_staff,
+                        notification_type='client_approved',
+                        title='Client Approved',
+                        message=f'Client {client.get_full_name()} ({client.client_id}) has been approved.',
+                        related_client=client,
+                    )
+                notify_role(
+                    roles='manager',
+                    branch=client.branch,
+                    notification_type='client_approved',
+                    title='Client Approved',
+                    message=f'Client {client.get_full_name()} ({client.client_id}) has been approved by {request.user.get_full_name()}.',
+                    related_client=client,
+                    exclude_user=request.user,
+                )
+
             else:  # reject
                 client.approval_status = 'rejected'
                 client.approved_by = request.user
                 client.approved_at = timezone.now()
-                client.notes = notes  # Store rejection reason
+                client.notes = notes
                 client.save()
 
                 messages.warning(request, f'Client {client.get_full_name()} rejected.')
+                notify_role(
+                    roles='manager',
+                    branch=client.branch,
+                    notification_type='client_rejected',
+                    title='Client Rejected',
+                    message=f'Client {client.get_full_name()} ({client.client_id}) was rejected by {request.user.get_full_name()}. Reason: {notes or "No reason given"}',
+                    related_client=client,
+                    is_urgent=True,
+                    exclude_user=request.user,
+                )
 
             return redirect('core:client_detail', client_id=client.id)
     else:
         form = ClientApprovalForm()
 
+    savings_products = SavingsProduct.objects.filter(is_active=True).order_by('name')
+
     context = {
         'page_title': f'Approve Client: {client.get_full_name()}',
         'client': client,
         'form': form,
+        'savings_products': savings_products,
     }
 
     return render(request, 'clients/approve.html', context)
@@ -580,23 +685,37 @@ def client_pay_registration_fee(request, client_id):
             if reference_number:
                 payment_details += f" - Ref: {reference_number}"
 
-            # Create transaction record
-            transaction = Transaction.objects.create(
-                client=client,
-                branch=client.branch,
-                transaction_type='registration_fee',
-                amount=CLIENT_REGISTRATION_FEE,
-                payment_details=payment_details,
-                description=f"Client registration fee payment via {payment_method.replace('_', ' ')}",
-                notes=notes,
-                processed_by=request.user,
-                status='completed',
-                is_income=True
-            )
+            # Create one transaction + one journal entry per fee line item
+            first_transaction = None
+            with transaction.atomic():
+                for item in CLIENT_REGISTRATION_FEE_BREAKDOWN:
+                    txn = Transaction.objects.create(
+                        client=client,
+                        branch=client.branch,
+                        transaction_type=item['key'],
+                        amount=item['amount'],
+                        payment_details=payment_details,
+                        description=f"{item['label']} — {client.get_full_name()} via {payment_method.replace('_', ' ')}",
+                        notes=notes,
+                        processed_by=request.user,
+                        status='completed',
+                        is_income=True,
+                    )
+                    post_fee_collection_journal(
+                        fee_type=item['key'],
+                        amount=item['amount'],
+                        client=client,
+                        branch=client.branch,
+                        processed_by=request.user,
+                        transaction_obj=txn,
+                    )
+                    if first_transaction is None:
+                        first_transaction = txn
 
-            # Mark registration fee as paid
-            client.registration_fee_paid = True
-            client.save()
+                # Mark registration fee as paid
+                client.registration_fee_paid = True
+                client.registration_fee_transaction = first_transaction
+                client.save()
 
             messages.success(
                 request,
@@ -611,7 +730,91 @@ def client_pay_registration_fee(request, client_id):
         'page_title': f'Pay Registration Fee: {client.get_full_name()}',
         'client': client,
         'form': form,
+        'fee_breakdown': CLIENT_REGISTRATION_FEE_BREAKDOWN,
         'registration_fee': CLIENT_REGISTRATION_FEE,
     }
 
     return render(request, 'clients/pay_registration_fee.html', context)
+
+
+# =============================================================================
+# CLIENT STATEMENT VIEW
+# =============================================================================
+
+@login_required
+def client_statement(request, client_id):
+    """
+    Printable client account statement.
+
+    Shows a chronological ledger of all transactions for the client:
+      - Loan disbursements & repayments
+      - Savings deposits & withdrawals
+      - Fee payments
+      - Penalties
+
+    Permissions: All authenticated users who can view the client.
+    """
+    checker = PermissionChecker(request.user)
+    client = get_object_or_404(
+        Client.objects.select_related('branch', 'assigned_staff'),
+        id=client_id,
+    )
+
+    if not checker.can_view_client(client):
+        raise PermissionDenied
+
+    # Date range filter (default: last 12 months)
+    date_from_str = request.GET.get('date_from', '')
+    date_to_str = request.GET.get('date_to', '')
+    today = timezone.now().date()
+
+    if date_from_str:
+        try:
+            from datetime import date
+            date_from = date.fromisoformat(date_from_str)
+        except ValueError:
+            date_from = today.replace(month=1, day=1)
+    else:
+        date_from = today.replace(year=today.year - 1 if today.month > 1 else today.year - 1)
+
+    if date_to_str:
+        try:
+            from datetime import date
+            date_to = date.fromisoformat(date_to_str)
+        except ValueError:
+            date_to = today
+    else:
+        date_to = today
+
+    transactions = (
+        Transaction.objects.filter(
+            client=client,
+            transaction_date__date__range=[date_from, date_to],
+        )
+        .select_related('loan', 'savings_account', 'processed_by')
+        .order_by('transaction_date')
+    )
+
+    # Outflow types: money leaving the bank (paid TO/FOR the client)
+    _OUTFLOW = {'loan_disbursement', 'withdrawal'}
+
+    # Evaluate queryset once so Python iteration caches the results
+    transactions = list(transactions)
+
+    total_out = sum(t.amount for t in transactions if t.transaction_type in _OUTFLOW)
+    total_in  = sum(t.amount for t in transactions if t.transaction_type not in _OUTFLOW)
+
+    context = {
+        'page_title': f'Account Statement — {client.get_full_name()}',
+        'client': client,
+        'transactions': transactions,
+        'transaction_count': len(transactions),
+        'date_from': date_from,
+        'date_to': date_to,
+        'total_in': total_in,
+        'total_out': total_out,
+        'net_position': total_in - total_out,
+        'today': today,
+    }
+
+    return render(request, 'clients/statement.html', context)

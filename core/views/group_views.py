@@ -5,6 +5,8 @@ Client Group Views
 CRUD operations and member management for client groups
 """
 
+import json
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -15,6 +17,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.models import ClientGroup, Client, GroupMembershipRequest
+from core.services.notification_service import notify, notify_role
 from core.forms.group_forms import (
     ClientGroupForm, ClientGroupSearchForm, AddMemberForm,
     BulkAddMembersForm, UpdateMemberRoleForm, ApproveGroupForm,
@@ -174,6 +177,16 @@ def group_create(request):
             group.created_by = request.user
             group.save()
 
+            # Notify branch manager that a new group needs approval
+            notify_role(
+                roles='manager',
+                branch=group.branch,
+                notification_type='group_created',
+                title='New Group Pending Approval',
+                message=f'A new client group "{group.name}" ({group.code}) has been created by {request.user.get_full_name()} and is awaiting approval.',
+                exclude_user=request.user,
+            )
+
             messages.success(
                 request,
                 f'Group {group.name} ({group.code}) created successfully! Awaiting approval.'
@@ -188,6 +201,7 @@ def group_create(request):
         'page_title': 'Create Client Group',
         'form': form,
         'is_create': True,
+        'locked_loan_officer': form.locked_loan_officer,
     }
 
     return render(request, 'groups/form.html', context)
@@ -230,6 +244,7 @@ def group_update(request, group_id):
         'form': form,
         'group': group,
         'is_create': False,
+        'locked_loan_officer': form.locked_loan_officer,
     }
 
     return render(request, 'groups/form.html', context)
@@ -274,6 +289,15 @@ def group_approve(request, group_id):
                 group.save()
 
                 messages.success(request, f'Group {group.name} approved successfully!')
+
+                # Notify the group creator
+                if group.created_by and group.created_by != request.user:
+                    notify(
+                        user=group.created_by,
+                        notification_type='group_created',
+                        title='Group Approved',
+                        message=f'Your client group "{group.name}" ({group.code}) has been approved by {request.user.get_full_name()}.',
+                    )
             else:
                 group.status = 'inactive'
                 group.approval_status = 'rejected'
@@ -283,6 +307,16 @@ def group_approve(request, group_id):
                 group.save()
 
                 messages.warning(request, f'Group {group.name} rejected.')
+
+                # Notify the group creator
+                if group.created_by and group.created_by != request.user:
+                    notify(
+                        user=group.created_by,
+                        notification_type='group_created',
+                        title='Group Rejected',
+                        message=f'Your client group "{group.name}" ({group.code}) has been rejected by {request.user.get_full_name()}. Notes: {notes or "None"}',
+                        is_urgent=True,
+                    )
 
             return redirect('core:group_detail', group_id=group.id)
     else:
@@ -338,6 +372,19 @@ def group_add_member(request, group_id):
                     requested_role=group_role,
                     status='pending',
                     requested_by=request.user
+                )
+
+                notify_role(
+                    roles='manager',
+                    branch=group.branch,
+                    notification_type='group_member_added',
+                    title='New Group Member Pending Approval',
+                    message=(
+                        f'{request.user.get_full_name()} added {client.full_name} '
+                        f'to group "{group.name}" ({group.code}). '
+                        f'Membership is awaiting your approval.'
+                    ),
+                    exclude_user=request.user,
                 )
 
                 messages.success(
@@ -415,6 +462,18 @@ def group_add_members_bulk(request, group_id):
                     request,
                     f'{added_count} member(s) added to {group.name}. Awaiting approval.'
                 )
+                notify_role(
+                    roles='manager',
+                    branch=group.branch,
+                    notification_type='group_member_added',
+                    title='New Group Members Pending Approval',
+                    message=(
+                        f'{request.user.get_full_name()} added {added_count} member(s) '
+                        f'to group "{group.name}" ({group.code}). '
+                        f'Membership requests are awaiting your approval.'
+                    ),
+                    exclude_user=request.user,
+                )
             if skipped:
                 messages.warning(
                     request,
@@ -425,10 +484,29 @@ def group_add_members_bulk(request, group_id):
     else:
         form = BulkAddMembersForm(group=group)
 
+    # Serialize available clients as JSON for the JS picker
+    clients_qs = form.fields['clients'].queryset
+    clients_json = json.dumps([
+        {
+            'id': str(c.id),
+            'name': c.full_name,
+            'client_id': c.client_id,
+        }
+        for c in clients_qs
+    ])
+
+    # Restore previously selected IDs when form is re-displayed with errors
+    selected_ids = json.dumps(
+        [str(pk) for pk in request.POST.getlist('clients')]
+        if request.method == 'POST' else []
+    )
+
     context = {
         'page_title': f'Add Multiple Members to {group.name}',
         'group': group,
         'form': form,
+        'clients_json': clients_json,
+        'selected_ids': selected_ids,
     }
 
     return render(request, 'groups/add_members_bulk.html', context)
@@ -475,6 +553,14 @@ def group_approve_member(request, request_id):
                             request,
                             f'{membership_request.client.full_name} approved for {membership_request.group.name}!'
                         )
+                        if membership_request.client.assigned_staff:
+                            notify(
+                                user=membership_request.client.assigned_staff,
+                                notification_type='group_assigned',
+                                title='Client Added to Group',
+                                message=f'{membership_request.client.full_name} has been approved as a member of group {membership_request.group.name}.',
+                                related_client=membership_request.client,
+                            )
                     else:
                         membership_request.reject(request.user, notes)
                         messages.warning(

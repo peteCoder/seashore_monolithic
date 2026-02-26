@@ -46,7 +46,7 @@
 
     <!-- Form -->
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6">
-        <form method="post">
+        <form method="post" enctype="multipart/form-data">
             {% csrf_token %}
 
             <!-- Guarantor Type Selection -->
@@ -199,7 +199,7 @@
                     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
                         <i class="fas fa-id-card text-primary-600 dark:text-primary-400 mr-2"></i>Identification
                     </h3>
-                    <p class="text-sm text-gray-500 dark:text-gray-400">Optional</p>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Signature is required. ID images are optional.</p>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -225,6 +225,56 @@
                         {% endif %}
                     </div>
                 </div>
+
+                <!-- Image uploads -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
+
+                    <!-- ID Card Front -->
+                    <div x-data="{ preview: '{% if is_edit and guarantor.id_card_front %}{{ guarantor.id_card_front.url }}{% endif %}' }">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            ID Card (Front)
+                        </label>
+                        <input type="file"
+                               name="id_card_front"
+                               accept="image/*"
+                               @change="if ($event.target.files[0]) { preview = URL.createObjectURL($event.target.files[0]) }"
+                               class="block w-full text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none">
+                        <div x-show="preview" class="mt-2">
+                            <img :src="preview" class="h-32 w-full object-cover rounded-lg border border-gray-300 dark:border-gray-600">
+                        </div>
+                    </div>
+
+                    <!-- ID Card Back -->
+                    <div x-data="{ preview: '{% if is_edit and guarantor.id_card_back %}{{ guarantor.id_card_back.url }}{% endif %}' }">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            ID Card (Back)
+                        </label>
+                        <input type="file"
+                               name="id_card_back"
+                               accept="image/*"
+                               @change="if ($event.target.files[0]) { preview = URL.createObjectURL($event.target.files[0]) }"
+                               class="block w-full text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none">
+                        <div x-show="preview" class="mt-2">
+                            <img :src="preview" class="h-32 w-full object-cover rounded-lg border border-gray-300 dark:border-gray-600">
+                        </div>
+                    </div>
+
+                    <!-- Signature -->
+                    <div x-data="{ preview: '{% if is_edit and guarantor.signature %}{{ guarantor.signature.url }}{% endif %}' }">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Signature Image <span class="text-red-500">*</span>
+                        </label>
+                        <input type="file"
+                               name="signature"
+                               accept="image/*"
+                               @change="if ($event.target.files[0]) { preview = URL.createObjectURL($event.target.files[0]) }"
+                               class="block w-full text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none">
+                        <div x-show="preview" class="mt-2">
+                            <img :src="preview" class="h-24 w-full object-contain rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900">
+                        </div>
+                    </div>
+
+                </div>
             </div>
 
             <!-- Guarantee Details Section -->
@@ -246,7 +296,8 @@
                         <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.guarantee_amount.errors.0 }}</p>
                         {% endif %}
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                            The amount this guarantor is guaranteeing (suggested: ₦{{ loan.principal_amount|floatformat:2|intcomma }} / {{ required_count }})
+                            <i class="fas fa-info-circle mr-1"></i>
+                            Auto-filled: ₦{{ loan.principal_amount|floatformat:2|intcomma }} &divide; {{ required_count }} guarantor{{ required_count|pluralize }}
                         </p>
                     </div>
                 </div>
@@ -298,12 +349,58 @@ function toggleGuarantorType(value) {
     }
 }
 
+// Populate guarantor fields from a selected internal client
+function populateFromClient(clientId) {
+    if (!clientId) return;
+    fetch('/clients/ajax/details/?client_id=' + encodeURIComponent(clientId))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var set = function(id, val) {
+                var el = document.getElementById(id);
+                if (el) el.value = val || '';
+            };
+            set('id_name',          data.name);
+            set('id_phone',         data.phone);
+            set('id_email',         data.email);
+            set('id_address',       data.address);
+            set('id_occupation',    data.occupation);
+            set('id_employer',      data.employer);
+            set('id_monthly_income',data.monthly_income);
+            set('id_id_type',       data.id_type);
+            set('id_id_number',     data.id_number);
+        })
+        .catch(function() {});
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     const guarantorType = document.getElementById('id_guarantor_type');
     if (guarantorType) {
         toggleGuarantorType(guarantorType.value);
+        guarantorType.addEventListener('change', function() {
+            toggleGuarantorType(this.value);
+        });
     }
+
+    // Auto-populate fields when a linked client is chosen
+    const linkedClient = document.getElementById('id_linked_client');
+    if (linkedClient) {
+        linkedClient.addEventListener('change', function() {
+            populateFromClient(this.value);
+        });
+        // If editing and a client is already selected, populate on load
+        if (linkedClient.value) {
+            populateFromClient(linkedClient.value);
+        }
+    }
+
+    {% if not is_edit %}
+    // Set default guarantee amount from server-computed value
+    var amountField = document.querySelector('[name="guarantee_amount"]');
+    if (amountField) {
+        amountField.value = '{{ default_guarantee_amount }}';
+    }
+    {% endif %}
 });
 </script>
 {% endblock %}

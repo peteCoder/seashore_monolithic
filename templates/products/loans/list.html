@@ -111,7 +111,7 @@
                         </span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                        <div>{{ product.monthly_interest_rate }}% monthly</div>
+                        <div>{{ product.monthly_interest_rate_pct|floatformat:2 }}% monthly</div>
                         <div class="text-xs text-gray-500 dark:text-gray-400">{{ product.annual_interest_rate }}% annual</div>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">

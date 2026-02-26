@@ -22,6 +22,7 @@ from .all_models import (
     MONTHLY_INTEREST_RATE,
     LOAN_FORM_FEE,
     CLIENT_REGISTRATION_FEE,
+    CLIENT_REGISTRATION_FEE_BREAKDOWN,
 
 
     # Core Models
@@ -53,6 +54,7 @@ from .all_models import (
     Notification,
     Guarantor,
     NextOfKin,
+    Collateral,
     AssignmentRequest,
     LoanRepaymentSchedule,
     LoanPenalty,
@@ -69,8 +71,13 @@ from .all_models import (
 
     SavingsDepositPosting,
     SavingsWithdrawalPosting,
-    
-    
+
+    # Financial Operations
+    BankReconciliation,
+    BankStatementLine,
+    LoanInsuranceClaim,
+    InterBranchTransfer,
+
 
 
 
@@ -113,6 +120,7 @@ __all__ = [
     'Notification',
     'Guarantor',
     'NextOfKin',
+    'Collateral',
     'AssignmentRequest',
     'LoanRepaymentSchedule',
     'LoanPenalty',
@@ -126,6 +134,7 @@ __all__ = [
     'MONTHLY_INTEREST_RATE',
     'LOAN_FORM_FEE',
     'CLIENT_REGISTRATION_FEE',
+    'CLIENT_REGISTRATION_FEE_BREAKDOWN',
 
 
     'FollowUpTask',
@@ -137,8 +146,12 @@ __all__ = [
     'GroupCollectionItem',
     'GroupSavingsCollectionItem',
     'GroupSavingsCollectionSession',
-    
 
+    # Financial Operations
+    'BankReconciliation',
+    'BankStatementLine',
+    'LoanInsuranceClaim',
+    'InterBranchTransfer',
 ]
 
 

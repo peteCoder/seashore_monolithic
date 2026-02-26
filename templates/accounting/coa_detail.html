@@ -16,7 +16,7 @@
 
     <!-- Account Header -->
     <div class="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-        <div class="flex items-center justify-between mb-4">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
             <div>
                 <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
                     {{ account.gl_code }} - {{ account.account_name }}
@@ -25,13 +25,15 @@
                     {{ account.description|default:"No description" }}
                 </p>
             </div>
-            {% if user.user_role == 'director' or user.user_role == 'admin' %}
-            <a href="{% url 'core:coa_edit' account_id=account.id %}"
-               class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
-                <i class="fas fa-edit mr-2"></i>
-                Edit Account
-            </a>
-            {% endif %}
+            <div class="flex flex-wrap items-center gap-3">
+                {% if user.user_role == 'director' or user.user_role == 'admin' %}
+                <a href="{% url 'core:coa_edit' account_id=account.id %}"
+                   class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
+                    <i class="fas fa-edit mr-2"></i>
+                    Edit Account
+                </a>
+                {% endif %}
+            </div>
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">

@@ -6,38 +6,30 @@
 {% block content %}
 <div class="space-y-6" x-data="{ showActivateModal: false }">
     <!-- Header with Actions -->
-    <div class="flex items-center justify-between">
-        <div class="flex items-center space-x-4">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="flex items-center space-x-3">
             <!-- Profile Picture -->
-            <div class="w-20 h-20 rounded-full overflow-hidden">
+            <div class="w-14 h-14 rounded-full overflow-hidden shrink-0">
                 {% if client.profile_picture %}
                 <img src="{{ client.profile_picture.url }}" class="w-full h-full object-cover" alt="{{ client.get_full_name }}">
                 {% else %}
-                <div class="w-full h-full bg-primary-600 flex items-center justify-center text-white text-2xl font-bold">
+                <div class="w-full h-full bg-primary-600 flex items-center justify-center text-white text-lg font-bold">
                     {{ client.first_name.0 }}{{ client.last_name.0 }}
                 </div>
                 {% endif %}
             </div>
 
             <div>
-                <h1 class="text-3xl font-bold text-gray-900 dark:text-white">
+                <h1 class="text-xl font-bold text-gray-900 dark:text-white">
                     {{ client.get_full_name }}
                 </h1>
-                <p class="text-gray-600 dark:text-gray-400">{{ client.client_id }}</p>
-                <div class="flex items-center space-x-2 mt-2">
+                <p class="text-sm text-gray-600 dark:text-gray-400">{{ client.client_id }}</p>
+                <div class="flex flex-wrap items-center gap-2 mt-1">
                     <!-- Status Badges -->
                     <span class="px-2 py-1 text-xs font-semibold rounded-full
                                  {% if client.is_active %}bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300
                                  {% else %}bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300{% endif %}">
                         {% if client.is_active %}Active{% else %}Inactive{% endif %}
-                    </span>
-                    <span class="px-2 py-1 text-xs font-semibold rounded-full
-                                 {% if client.level == 'bronze' %}bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300
-                                 {% elif client.level == 'silver' %}bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300
-                                 {% elif client.level == 'gold' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300
-                                 {% elif client.level == 'platinum' %}bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300
-                                 {% else %}bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300{% endif %}">
-                        {{ client.get_level_display }}
                     </span>
                     <span class="px-2 py-1 text-xs font-semibold rounded-full
                                  {% if client.approval_status == 'approved' %}bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300
@@ -51,7 +43,7 @@
         </div>
 
         <!-- Action Buttons -->
-        <div class="flex items-center space-x-3">
+        <div class="flex flex-wrap items-center gap-3">
             {% if checker.is_admin_or_director or checker.is_manager and client.branch == checker.user.branch %}
             <a href="{% url 'core:client_update' client.id %}"
                class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
@@ -104,6 +96,16 @@
                 <i class="fas fa-trash mr-2"></i>Delete
             </a>
             {% endif %}
+
+            <!-- Reports -->
+            <a href="{% url 'core:client_statement' client.id %}"
+               class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                <i class="fas fa-file-alt mr-1"></i>Statement
+            </a>
+            <a href="{% url 'core:subsidiary_ledger' client.id %}"
+               class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                <i class="fas fa-book mr-1"></i>GL Ledger
+            </a>
         </div>
     </div>
 
@@ -113,7 +115,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">Total Loans</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">₦{{ total_loans|floatformat:2|intcomma|default:"0.00" }}</p>
+                    <p class="text-xl font-bold text-gray-900 dark:text-white">₦{{ total_loans|floatformat:2|intcomma|default:"0.00" }}</p>
                 </div>
                 <div class="w-12 h-12 bg-blue-100 dark:bg-blue-900/20 rounded-lg flex items-center justify-center">
                     <i class="fas fa-hand-holding-usd text-blue-600 dark:text-blue-400 text-xl"></i>
@@ -125,7 +127,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">Outstanding Balance</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">₦{{ total_outstanding|floatformat:2|intcomma|default:"0.00" }}</p>
+                    <p class="text-xl font-bold text-gray-900 dark:text-white">₦{{ total_outstanding|floatformat:2|intcomma|default:"0.00" }}</p>
                 </div>
                 <div class="w-12 h-12 bg-red-100 dark:bg-red-900/20 rounded-lg flex items-center justify-center">
                     <i class="fas fa-exclamation-triangle text-red-600 dark:text-red-400 text-xl"></i>
@@ -137,7 +139,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">Total Savings</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">₦{{ total_savings|floatformat:2|intcomma|default:"0.00" }}</p>
+                    <p class="text-xl font-bold text-gray-900 dark:text-white">₦{{ total_savings|floatformat:2|intcomma|default:"0.00" }}</p>
                 </div>
                 <div class="w-12 h-12 bg-green-100 dark:bg-green-900/20 rounded-lg flex items-center justify-center">
                     <i class="fas fa-piggy-bank text-green-600 dark:text-green-400 text-xl"></i>
@@ -149,8 +151,8 @@
     <!-- Tabbed Content -->
     <div x-data="{ activeTab: 'personal' }">
         <!-- Tab Navigation -->
-        <div class="bg-white dark:bg-gray-800 rounded-t-lg shadow-sm border-b border-gray-200 dark:border-gray-700">
-            <nav class="flex space-x-8 px-6">
+        <div class="bg-white dark:bg-gray-800 rounded-t-lg shadow-sm border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+            <nav class="flex space-x-4 sm:space-x-8 px-6 min-w-max">
                 <button @click="activeTab = 'personal'"
                         class="py-4 border-b-2 font-medium text-sm transition-colors"
                         :class="activeTab === 'personal' ? 'border-primary-600 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'">
@@ -544,26 +546,6 @@
                     </div>
                     {% endif %}
 
-                    <!-- Credit & Risk -->
-                    <div class="md:col-span-2">
-                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4 mt-6 border-b border-gray-200 dark:border-gray-700 pb-2">Credit & Risk Information</h3>
-                    </div>
-
-                    <div>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">Credit Score</p>
-                        <p class="text-base font-medium text-gray-900 dark:text-white">{{ client.credit_score }}/1000</p>
-                    </div>
-
-                    <div>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">Risk Rating</p>
-                        <span class="inline-flex items-center px-2 py-1 text-sm font-medium rounded-full
-                                     {% if client.risk_rating == 'low' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300
-                                     {% elif client.risk_rating == 'medium' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300
-                                     {% else %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300{% endif %}">
-                            {{ client.get_risk_rating_display }}
-                        </span>
-                    </div>
-
                     {% if client.origin_channel and client.origin_channel != 'NONE' %}
                     <div>
                         <p class="text-sm text-gray-600 dark:text-gray-400">Origin Channel</p>
@@ -643,9 +625,10 @@
                 {% if savings_accounts %}
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {% for account in savings_accounts %}
-                    <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                    <a href="{% url 'core:savings_account_detail' account_id=account.id %}"
+                       class="block border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:border-primary-400 dark:hover:border-primary-500 hover:shadow-md transition-all group">
                         <div class="flex items-center justify-between mb-2">
-                            <h4 class="font-semibold text-gray-900 dark:text-white">{{ account.savings_product.name }}</h4>
+                            <h4 class="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">{{ account.savings_product.name }}</h4>
                             <span class="px-2 py-1 text-xs font-semibold rounded-full
                                          {% if account.status == 'active' %}bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300
                                          {% else %}bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300{% endif %}">
@@ -654,7 +637,10 @@
                         </div>
                         <p class="text-sm text-gray-600 dark:text-gray-400">Account: {{ account.account_number }}</p>
                         <p class="text-2xl font-bold text-gray-900 dark:text-white mt-2">₦{{ account.balance|floatformat:2|intcomma }}</p>
-                    </div>
+                        <p class="text-xs text-primary-600 dark:text-primary-400 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <i class="fas fa-arrow-right mr-1"></i>View account details
+                        </p>
+                    </a>
                     {% endfor %}
                 </div>
                 {% else %}

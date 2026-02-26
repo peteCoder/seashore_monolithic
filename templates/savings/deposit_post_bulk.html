@@ -121,15 +121,14 @@
                                 {{ account.savings_product.name }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm font-bold text-green-600 dark:text-green-400">₦{{ account.current_balance|floatformat:2|intcomma }}</div>
+                                <div class="text-sm font-bold text-green-600 dark:text-green-400">₦{{ account.balance|floatformat:2|intcomma }}</div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <input type="number"
+                                <input type="text"
+                                       inputmode="decimal"
                                        :name="'amount_' + '{{ account.id }}'"
                                        x-model="amounts['{{ account.id }}']"
                                        @focus="selectAccountIfNeeded('{{ account.id }}')"
-                                       step="0.01"
-                                       min="0"
                                        placeholder="Enter amount"
                                        class="w-32 px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 text-sm">
                             </td>
@@ -177,7 +176,7 @@
             <input type="hidden" :name="'account_' + accountId" :value="accountId">
         </template>
         <input type="hidden" name="payment_method" :value="paymentMethod">
-        <input type="hidden" name="transaction_date" :value="transactionDate">
+        <input type="hidden" name="payment_date" :value="transactionDate">
         <input type="hidden" name="payment_reference" :value="paymentReference">
     </form>
 </div>
@@ -223,11 +222,14 @@ function bulkDepositApp() {
             }
         },
 
+        parseCleaned(val) {
+            return parseFloat(String(val || 0).replace(/,/g, '')) || 0;
+        },
+
         calculateTotal() {
             let total = 0;
             for (const accountId of this.selectedAccounts) {
-                const amount = parseFloat(this.amounts[accountId] || 0);
-                total += amount;
+                total += this.parseCleaned(this.amounts[accountId]);
             }
             return total;
         }

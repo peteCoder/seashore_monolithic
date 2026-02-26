@@ -145,15 +145,19 @@
                     </div>
 
                     <!-- Client Signature -->
-                    <div class="mb-6" x-data="{ preview: null }">
+                    <div class="mb-6">
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Client Signature
+                            Client Signature <span class="text-red-500">*</span>
                         </label>
                         {{ form.client_signature }}
                         {% if form.client_signature.errors %}
                         <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.client_signature.errors.0 }}</p>
                         {% endif %}
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Upload the client's signature image</p>
+                        <div id="signaturePreview" class="hidden mt-2">
+                            <img id="signaturePreviewImg" src="" alt="Signature preview"
+                                 class="h-24 w-48 object-cover rounded-lg border border-gray-300 dark:border-gray-600">
+                        </div>
                     </div>
 
                     <!-- Calculate Button -->
@@ -209,7 +213,7 @@
                             <span class="text-sm font-bold text-gray-900 dark:text-white" id="calcTotalRepayment">-</span>
                         </div>
                         <div class="flex items-center justify-between pt-2">
-                            <span class="text-sm font-semibold text-gray-900 dark:text-white">Monthly Installment</span>
+                            <span class="text-sm font-semibold text-gray-900 dark:text-white" id="installmentLabel">Installment</span>
                             <span class="text-lg font-bold text-primary-600 dark:text-primary-400" id="calcMonthlyPayment">-</span>
                         </div>
                     </div>
@@ -263,6 +267,50 @@ document.addEventListener('DOMContentLoaded', function() {
     const loanProductSelect = document.getElementById('{{ form.loan_product.id_for_label }}');
     const principalInput = document.getElementById('{{ form.principal_amount.id_for_label }}');
     const durationInput = document.getElementById('{{ form.duration_months.id_for_label }}');
+    const clientSelect = document.getElementById('{{ form.client.id_for_label }}');
+    const linkedAccountSelect = document.getElementById('{{ form.linked_account.id_for_label }}');
+
+    // ── Linked account: populate dynamically when client changes ──────────────
+    const SAVINGS_ACCOUNTS_URL = '/clients/ajax/savings-accounts/';
+
+    async function loadLinkedAccounts(clientId) {
+        if (!linkedAccountSelect) return;
+        linkedAccountSelect.innerHTML = '<option value="">---------</option>';
+        if (!clientId) return;
+
+        try {
+            const resp = await fetch(`${SAVINGS_ACCOUNTS_URL}?client_id=${clientId}`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+
+            if (data.accounts.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No active savings accounts for this client';
+                opt.disabled = true;
+                linkedAccountSelect.appendChild(opt);
+            } else {
+                data.accounts.forEach(acc => {
+                    const opt = document.createElement('option');
+                    opt.value = acc.id;
+                    opt.textContent = acc.label;
+                    linkedAccountSelect.appendChild(opt);
+                });
+            }
+        } catch (e) {
+            console.error('Failed to load savings accounts:', e);
+        }
+    }
+
+    if (clientSelect) {
+        clientSelect.addEventListener('change', function() {
+            loadLinkedAccounts(this.value);
+        });
+        // Populate immediately if a client is already selected (e.g. form re-render after error)
+        if (clientSelect.value) {
+            loadLinkedAccounts(clientSelect.value);
+        }
+    }
 
     // Store current product data
     let currentProductData = null;
@@ -270,6 +318,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Function to format currency
     function formatCurrency(amount) {
         return `₦${parseFloat(amount).toLocaleString('en-NG', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    }
+
+    // Calculate number of installments based on repayment frequency
+    function getNumInstallments(freq, durationMonths) {
+        if (freq === 'daily')       return durationMonths * 20;  // 20 standard working days/month
+        if (freq === 'weekly')      return durationMonths * 4;
+        if (freq === 'fortnightly') return durationMonths * 2;
+        if (freq === 'yearly')      return Math.max(1, Math.floor(durationMonths / 12));
+        return durationMonths; // monthly (default)
     }
 
     // Function to fetch and display loan product details
@@ -289,6 +346,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const data = await response.json();
             currentProductData = data;
+
+            // Update installment label to match the product's repayment frequency
+            const lbl = document.getElementById('installmentLabel');
+            if (lbl) lbl.textContent = (data.repayment_frequency_display || 'Monthly') + ' Installment';
 
             // Update product details section
             document.getElementById('productName').textContent = data.name;
@@ -337,10 +398,22 @@ document.addEventListener('DOMContentLoaded', function() {
         fetchProductDetails(loanProductSelect.value);
     }
 
+    // ── Signature preview ─────────────────────────────────────────────────────
+    const signatureInput = document.getElementById('{{ form.client_signature.id_for_label }}');
+    if (signatureInput) {
+        signatureInput.addEventListener('change', function () {
+            const file = this.files[0];
+            if (file) {
+                document.getElementById('signaturePreviewImg').src = URL.createObjectURL(file);
+                document.getElementById('signaturePreview').classList.remove('hidden');
+            }
+        });
+    }
+
     // Calculate button click handler
     calculateBtn.addEventListener('click', function() {
         const loanProductId = loanProductSelect.value;
-        const principal = parseFloat(principalInput.value);
+        const principal = parseFloat(principalInput.value.replace(/,/g, ''));
         const duration = parseInt(durationInput.value);
 
         if (!loanProductId) {
@@ -365,10 +438,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const monthlyRate = currentProductData.monthly_interest_rate;
         const interestRatePercent = monthlyRate * 100;
 
-        // Calculate interest (flat rate)
+        // Calculate interest (flat rate: P × R × T, T in months)
         const totalInterest = principal * monthlyRate * duration;
         const totalRepayment = principal + totalInterest;
-        const monthlyPayment = totalRepayment / duration;
+        // Split total repayment by the actual number of installments for this frequency
+        const numInstallments = getNumInstallments(currentProductData.repayment_frequency, duration);
+        const monthlyPayment = totalRepayment / numInstallments;
 
         // Calculate fees based on product fee structure
         let totalFees = 0;

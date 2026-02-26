@@ -78,12 +78,14 @@ def group_collection_list(request):
     # Recent collection sessions
     recent_sessions = GroupCollectionSession.objects.select_related(
         'group', 'collected_by'
-    ).order_by('-created_at')[:10]
+    ).order_by('-created_at')
 
     if checker.is_staff():
         recent_sessions = recent_sessions.filter(collected_by=request.user)
     elif checker.is_manager():
         recent_sessions = recent_sessions.filter(group__branch=request.user.branch)
+
+    recent_sessions = recent_sessions[:10]
 
     context = {
         'page_title': 'Group Collections',
@@ -112,7 +114,7 @@ def group_collection_detail(request, group_id):
     _check_group_permission(checker, group, request)
 
     members_with_loans = Client.objects.filter(
-        client_group=group,
+        group=group,
         is_active=True,
         loans__status__in=['active', 'overdue']
     ).select_related('branch').prefetch_related('loans').distinct()
@@ -157,7 +159,7 @@ def group_collection_post(request, group_id):
     if request.method != 'POST':
         return redirect('core:group_collection_detail', group_id=group.id)
 
-    total_amount_entered = request.POST.get('total_amount', '0')
+    total_amount_entered = request.POST.get('total_amount', '0').replace(',', '')
     payment_method = request.POST.get('payment_method', 'cash')
     payment_date = request.POST.get('payment_date')
     payment_reference = request.POST.get('payment_reference', '')
@@ -181,9 +183,9 @@ def group_collection_post(request, group_id):
         if key.startswith('amount_') and value:
             loan_id = key.replace('amount_', '')
             try:
-                amount = Decimal(value)
+                amount = Decimal(value.replace(',', ''))
                 if amount > 0:
-                    loan = Loan.objects.get(id=loan_id, client__client_group=group)
+                    loan = Loan.objects.get(id=loan_id, client__group=group)
                     if amount > loan.outstanding_balance:
                         messages.error(
                             request,
@@ -252,7 +254,7 @@ def group_savings_collection(request, group_id):
     _check_group_permission(checker, group, request)
 
     members_with_savings = Client.objects.filter(
-        client_group=group,
+        group=group,
         is_active=True,
         savings_accounts__status='active'
     ).select_related('branch').prefetch_related('savings_accounts').distinct()
@@ -296,7 +298,8 @@ def group_savings_collection_post(request, group_id):
     if request.method != 'POST':
         return redirect('core:group_savings_collection', group_id=group.id)
 
-    total_amount_entered = request.POST.get('total_amount', '0')
+    # Strip commas so users can enter "9,000" as well as "9000"
+    total_amount_entered = request.POST.get('total_amount', '0').replace(',', '')
     payment_date = request.POST.get('payment_date')
     notes = request.POST.get('notes', '')
 
@@ -317,10 +320,10 @@ def group_savings_collection_post(request, group_id):
         if key.startswith('amount_') and value:
             account_id = key.replace('amount_', '')
             try:
-                amount = Decimal(value)
+                amount = Decimal(value.replace(',', ''))  # strip commas
                 if amount > 0:
                     account = SavingsAccount.objects.get(
-                        id=account_id, client__client_group=group, status='active'
+                        id=account_id, client__group=group, status='active'
                     )
                     client = account.client
                     items_data.append({'client': client, 'account': account, 'amount': amount})

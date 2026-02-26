@@ -28,10 +28,16 @@ from core.managers import (
     TransactionManager, ClientGroupManager
 )
 
-from core.utils.helpers import generate_repayment_schedule
+from core.utils.helpers import (
+    generate_repayment_schedule,
+    count_business_days_in_months,
+    next_business_day,
+    add_one_business_day,
+)
 from core.utils.accounting_helpers import (
     post_loan_disbursement_journal,
     post_loan_repayment_journal,
+    post_loan_upfront_fees_journal,
     post_savings_deposit_journal,
     post_savings_withdrawal_journal,
 )
@@ -60,7 +66,13 @@ logger = logging.getLogger(__name__)
 MONTHLY_INTEREST_RATE = Decimal('0.035')  # 3.5% per month (flat rate)
 LOAN_INSURANCE_RATE = Decimal('0.03')  # 3% of principal
 LOAN_FORM_FEE = Decimal('200.00')  # Fixed N200
-CLIENT_REGISTRATION_FEE = Decimal('2100.00')  # N2,100
+# Registration fee line items (each becomes its own transaction + journal entry)
+CLIENT_REGISTRATION_FEE_BREAKDOWN = [
+    {'key': 'registration_fee',    'label': 'Registration Fee', 'amount': Decimal('1500.00'), 'gl_code': '4110'},
+    {'key': 'id_card_fee',         'label': 'ID Card',          'amount': Decimal('500.00'),  'gl_code': '4112'},
+    {'key': 'membership_card_fee', 'label': 'Membership Card',  'amount': Decimal('100.00'),  'gl_code': '4114'},
+]
+CLIENT_REGISTRATION_FEE = sum(item['amount'] for item in CLIENT_REGISTRATION_FEE_BREAKDOWN)  # 2100.00
 
 
 # =============================================================================
@@ -68,26 +80,36 @@ CLIENT_REGISTRATION_FEE = Decimal('2100.00')  # N2,100
 # =============================================================================
 
 LOAN_TYPE_CHOICES = [
-    ('thrift', 'Thrift Loan (Daily Repayment)'),
-    ('group', 'Group Loan (Weekly Repayment)'),
-    ('med', 'MED Loan (Monthly Repayment)'),
-    ('business', 'Business Loan (Monthly Repayment)'),
-    ('emergency', 'Emergency Loan (Weekly Repayment)'),
-    ('salary_advance', 'Salary Advance (Monthly Repayment)'),
-    ('asset_finance', 'Asset Finance Loan'),
-    ('agricultural', 'Agricultural Loan'),
+    ('thrift',         'Thrift Loan'),
+    ('group',          'Group Loan'),
+    ('med',            'MED Loan'),
+    ('business',       'Business Loan'),
+    ('emergency',      'Emergency Loan'),
+    ('salary_advance', 'Salary Advance'),
+    ('asset_finance',  'Asset Finance Loan'),
+    ('agricultural',   'Agricultural Loan'),
 ]
 
+# Default repayment frequency seeded per loan type when a new product is created.
+# After creation the admin can override via the repayment_frequency field.
 REPAYMENT_FREQUENCY_MAP = {
-    'thrift': 'daily',
-    'group': 'weekly',
-    'med': 'monthly',
-    'business': 'monthly',
-    'emergency': 'weekly',
+    'thrift':         'daily',
+    'group':          'weekly',
+    'med':            'monthly',
+    'business':       'monthly',
+    'emergency':      'monthly',
     'salary_advance': 'monthly',
-    'asset_finance': 'monthly',
-    'agricultural': 'monthly',
+    'asset_finance':  'monthly',
+    'agricultural':   'monthly',
 }
+
+REPAYMENT_FREQUENCY_CHOICES = [
+    ('daily',       'Daily'),
+    ('weekly',      'Weekly'),
+    ('fortnightly', 'Fortnightly'),
+    ('monthly',     'Monthly'),
+    ('yearly',      'Yearly'),
+]
 
 
 # =============================================================================
@@ -492,7 +514,21 @@ class User(AbstractUser, StatusTrackingMixin):
     
     failed_login_attempts = models.IntegerField(default=0)
     account_locked_until = models.DateTimeField(null=True, blank=True)
-    
+
+    # ============================================
+    # TWO-FACTOR AUTHENTICATION (TOTP)
+    # ============================================
+    totp_secret = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="Base32 TOTP secret key (set when user enables 2FA)",
+    )
+    is_2fa_enabled = models.BooleanField(
+        default=False,
+        help_text="Whether TOTP two-factor authentication is enabled",
+    )
+
     # ============================================
     # DJANGO PERMISSIONS
     # ============================================
@@ -759,7 +795,7 @@ class ClientGroup(BaseModel, StatusTrackingMixin, ApprovalWorkflowMixin):
         null=True, 
         blank=True,
         related_name='managed_client_groups',
-        limit_choices_to={'user_role__in': ['loan_officer', 'manager']}
+        limit_choices_to={'user_role__in': ['staff', 'manager']}
     )
     
     registration_date = models.DateField(default=date.today)
@@ -1121,22 +1157,6 @@ class Client(BaseModel, StatusTrackingMixin, ApprovalWorkflowMixin):
     - Helper methods
     """
     
-    LEVEL_CHOICES = [
-        ('bronze', 'Bronze - Up to ₦50,000'),
-        ('silver', 'Silver - Up to ₦100,000'),
-        ('gold', 'Gold - Up to ₦500,000'),
-        ('platinum', 'Platinum - Up to ₦1,000,000'),
-        ('diamond', 'Diamond - Up to ₦5,000,000'),
-    ]
-    
-    LEVEL_LIMITS = {
-        'bronze': Decimal('50000.00'),
-        'silver': Decimal('100000.00'),
-        'gold': Decimal('500000.00'),
-        'platinum': Decimal('1000000.00'),
-        'diamond': Decimal('5000000.00')
-    }
-    
     MARITAL_STATUS_CHOICES = [
         ('single', 'Single'),
         ('married', 'Married'),
@@ -1426,29 +1446,6 @@ class Client(BaseModel, StatusTrackingMixin, ApprovalWorkflowMixin):
     )
     
     # ============================================
-    # CLIENT LEVEL & CREDIT
-    # ============================================
-    level = models.CharField(
-        max_length=20,
-        choices=LEVEL_CHOICES,
-        default='bronze',
-        db_index=True
-    )
-    credit_score = models.IntegerField(
-        default=0,
-        validators=[MinValueValidator(0), MaxValueValidator(1000)]
-    )
-    risk_rating = models.CharField(
-        max_length=20,
-        choices=[
-            ('low', 'Low Risk'),
-            ('medium', 'Medium Risk'),
-            ('high', 'High Risk')
-        ],
-        default='medium'
-    )
-    
-    # ============================================
     # REGISTRATION & APPROVAL
     # ============================================
     origin_channel = models.CharField(
@@ -1500,7 +1497,6 @@ class Client(BaseModel, StatusTrackingMixin, ApprovalWorkflowMixin):
             models.Index(fields=['assigned_staff', 'is_active']),
             models.Index(fields=['group', 'is_active']),
             models.Index(fields=['group', 'group_role']),
-            models.Index(fields=['level']),
             models.Index(fields=['approval_status']),
             models.Index(fields=['registration_fee_paid']),
             models.Index(fields=['date_of_birth']),
@@ -1519,10 +1515,6 @@ class Client(BaseModel, StatusTrackingMixin, ApprovalWorkflowMixin):
             models.CheckConstraint(
                 check=models.Q(years_in_business__gte=0) | models.Q(years_in_business__isnull=True),
                 name='client_years_in_business_positive'
-            ),
-            models.CheckConstraint(
-                check=models.Q(credit_score__gte=0) & models.Q(credit_score__lte=1000),
-                name='client_credit_score_range'
             ),
             # group_role only meaningful when group is set
             models.CheckConstraint(
@@ -1737,10 +1729,6 @@ class Client(BaseModel, StatusTrackingMixin, ApprovalWorkflowMixin):
     # HELPER METHODS
     # ============================================
     
-    def get_loan_limit(self):
-        """Get maximum loan amount based on client level"""
-        return self.LEVEL_LIMITS.get(self.level, Decimal('0.00'))
-    
     def can_borrow(self, amount):
         """
         Check if client can borrow - SIMPLIFIED VERSION
@@ -1811,50 +1799,6 @@ class Client(BaseModel, StatusTrackingMixin, ApprovalWorkflowMixin):
             'active_loans': active_loans,
             'overdue_loans': overdue_loans,
         }
-    
-    def upgrade_level(self):
-        """Upgrade client level based on loan history"""
-        # Simple logic - can be enhanced
-        loan_count = self.loans.filter(status='completed').count()
-        
-        if loan_count >= 10 and self.level == 'platinum':
-            self.level = 'diamond'
-        elif loan_count >= 7 and self.level == 'gold':
-            self.level = 'platinum'
-        elif loan_count >= 5 and self.level == 'silver':
-            self.level = 'gold'
-        elif loan_count >= 3 and self.level == 'bronze':
-            self.level = 'silver'
-        
-        self.save(update_fields=['level'])
-    
-    def calculate_credit_score(self):
-        """Calculate credit score based on history"""
-        # Simple scoring logic - can be enhanced
-        score = 500  # Base score
-        
-        # Add points for completed loans
-        completed_loans = self.loans.filter(status='completed').count()
-        score += completed_loans * 50
-        
-        # Deduct for overdue loans
-        overdue_loans = self.loans.filter(status='overdue').count()
-        score -= overdue_loans * 100
-        
-        # Add points for savings balance
-        if self.total_savings_balance > 100000:
-            score += 100
-        elif self.total_savings_balance > 50000:
-            score += 50
-        
-        # Cap at 1000
-        score = min(score, 1000)
-        score = max(score, 0)
-        
-        self.credit_score = score
-        self.save(update_fields=['credit_score'])
-        
-        return score
     
     def get_profile_picture_url(self):
         """Get profile picture URL safely"""
@@ -2074,7 +2018,13 @@ class LoanProduct(BaseModel, StatusTrackingMixin):
     # =========================================================================
     # REPAYMENT CONFIGURATION
     # =========================================================================
-    
+
+    repayment_frequency = models.CharField(
+        max_length=20,
+        choices=REPAYMENT_FREQUENCY_CHOICES,
+        default='monthly',
+        help_text="How often borrowers make installment payments (does not affect interest calculation)",
+    )
     allow_early_repayment = models.BooleanField(default=True)
     early_repayment_penalty_rate = models.DecimalField(
         max_digits=5,
@@ -2215,20 +2165,11 @@ class LoanProduct(BaseModel, StatusTrackingMixin):
         if errors:
             raise ValidationError(errors)
     
-    # =========================================================================
-    # PROPERTY: Get Repayment Frequency
-    # =========================================================================
-    
     @property
-    def repayment_frequency(self):
-        """Get repayment frequency based on loan type"""
-        return REPAYMENT_FREQUENCY_MAP.get(self.loan_type, 'monthly')
-    
-    def get_repayment_frequency_display(self):
-        """Get display value for repayment frequency"""
-        freq = self.repayment_frequency
-        return freq.capitalize()
-    
+    def monthly_interest_rate_pct(self):
+        """Return monthly interest rate as a percentage value (e.g. 0.035 → 3.50)."""
+        return self.monthly_interest_rate * Decimal('100')
+
     # =========================================================================
     # HELPER METHODS
     # =========================================================================
@@ -3017,6 +2958,17 @@ class SavingsAccount(BaseModel, ApprovalWorkflowMixin):
     def __str__(self):
         product_name = self.savings_product.name if self.savings_product else 'Unknown'
         return f"{self.account_number} - {product_name}"
+
+    @property
+    def current_balance(self):
+        """Alias for balance — used by templates."""
+        return self.balance
+
+    @property
+    def available_balance(self):
+        """Balance available for withdrawal (balance minus minimum balance requirement)."""
+        available = self.balance - self.minimum_balance
+        return available if available > Decimal('0.00') else Decimal('0.00')
 
     def save(self, *args, **kwargs):
         """Override save to auto-generate account number and set defaults"""
@@ -3871,6 +3823,17 @@ class Loan(BaseModel):
         max_digits=15, decimal_places=2, default=Decimal('0.00')
     )
 
+    # Interest accrued but not yet received (cleared when repayment is posted)
+    accrued_interest_balance = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text=(
+            "Cumulative interest accrued via month-end journals but not yet "
+            "received in cash. Cleared against 1820 (not 4010) when repayment arrives."
+        )
+    )
+
     # last-payment snapshot  ← NEW
     last_payment_amount = models.DecimalField(
         max_digits=15,
@@ -4094,13 +4057,30 @@ class Loan(BaseModel):
         return self.loan_product.repayment_frequency if self.loan_product else 'monthly'
 
     @property
+    def monthly_interest_rate_pct(self):
+        """Return the monthly interest rate as a percentage (e.g. 0.035 → 3.50)."""
+        return self.monthly_interest_rate * Decimal('100')
+
+    def get_repayment_frequency_display(self):
+        """Human-readable repayment frequency label (e.g. 'Daily', 'Monthly')."""
+        freq = self.repayment_frequency
+        labels = dict(REPAYMENT_FREQUENCY_CHOICES)
+        return labels.get(freq, freq.capitalize())
+
+    @property
     def balance(self):
         return self.outstanding_balance
 
     @property
     def days_overdue(self):
         if self.status == 'overdue' and self.next_repayment_date:
-            return max((timezone.now().date() - self.next_repayment_date).days, 0)
+            grace_days = (
+                self.loan_product.grace_period_days
+                if self.loan_product_id and self.loan_product
+                else 0
+            )
+            overdue_from = self.next_repayment_date + timezone.timedelta(days=grace_days)
+            return max((timezone.now().date() - overdue_from).days, 0)
         return 0
 
     @property
@@ -4151,50 +4131,73 @@ class Loan(BaseModel):
     def calculate_loan_details(self):
         """Calculate interest, installments, fees, APR, EIR, dates."""
         product = self.loan_product
+        method  = product.interest_calculation_method if product else 'flat'
 
-        # — interest type echoed from product
+        # — echo method onto loan
         if product:
-            self.interest_type = product.interest_calculation_method
+            self.interest_type = method
 
-        # — flat-rate core calculation (existing logic)
-        calc = InterestCalculator.calculate_flat_interest(
-            principal=self.principal_amount,
-            monthly_rate=product.monthly_interest_rate if product else Decimal('0.035'),
-            months=self.duration_months
-        )
-        self.monthly_interest_rate = calc['monthly_rate']
-        self.total_interest        = calc['total_interest']
-        self.total_repayment       = calc['total_repayment']
-        self.installment_amount    = calc['monthly_installment']
+        monthly_rate = product.monthly_interest_rate if product else Decimal('0.035')
+        self.monthly_interest_rate = monthly_rate
 
-        # — installment count & per-installment amount by frequency
+        # — installment count by frequency
+        # Daily: 20 standard working days per month.
+        # Interest calculation uses monthly rate regardless of frequency.
         freq_map = {
-            'daily':        self.duration_months * 30,
+            'daily':        self.duration_months * 20,
             'weekly':       self.duration_months * 4,
             'fortnightly':  self.duration_months * 2,
             'monthly':      self.duration_months,
+            'yearly':       max(1, self.duration_months // 12),
         }
-        self.number_of_installments = freq_map.get(self.repayment_frequency, self.duration_months)
-        if self.number_of_installments > 0:
-            self.installment_amount = MoneyCalculator.round_money(
-                self.total_repayment / self.number_of_installments
-            )
+        n = freq_map.get(self.repayment_frequency, self.duration_months)
+        self.number_of_installments = n
 
-        # — APR  (simple flat-rate → APR approximation)
-        #   APR = (total_interest / principal) / duration_months * 12 * 100
+        # — interest calculation: flat vs reducing balance
+        if method == 'reducing_balance' and n > 0:
+            # Period rate: scale the monthly rate to match the payment frequency.
+            period_rate_map = {
+                'daily':       monthly_rate / 20,
+                'weekly':      monthly_rate / 4,
+                'fortnightly': monthly_rate / 2,
+                'monthly':     monthly_rate,
+                'yearly':      monthly_rate * 12,
+            }
+            period_rate = period_rate_map.get(self.repayment_frequency, monthly_rate)
+            rb = InterestCalculator.calculate_reducing_balance_interest(
+                principal=self.principal_amount,
+                monthly_rate=period_rate,
+                months=n,
+            )
+            self.total_interest     = rb['total_interest']
+            self.total_repayment    = rb['total_repayment']
+            self.installment_amount = rb['emi']
+        else:
+            # Flat rate: interest = P × r × T (T in months, rate is monthly)
+            calc = InterestCalculator.calculate_flat_interest(
+                principal=self.principal_amount,
+                monthly_rate=monthly_rate,
+                months=self.duration_months,
+            )
+            self.total_interest  = calc['total_interest']
+            self.total_repayment = calc['total_repayment']
+            if n > 0:
+                self.installment_amount = MoneyCalculator.round_money(
+                    self.total_repayment / n
+                )
+            else:
+                self.installment_amount = calc['monthly_installment']
+
+        # — APR  (total cost of credit annualised)
         if self.principal_amount and self.duration_months:
             self.apr = MoneyCalculator.round_money(
                 (self.total_interest / self.principal_amount)
                 / self.duration_months * 12 * 100
             )
 
-        # — EIR  (approximate: uses the same ratio scaled by compounding factor)
-        #   EIR = ((1 + monthly_rate)^12 - 1) * 100
-        if self.monthly_interest_rate:
-            monthly = Decimal(str(self.monthly_interest_rate))
-            self.eir = MoneyCalculator.round_money(
-                ((1 + monthly) ** 12 - 1) * 100
-            )
+        # — EIR  = ((1 + monthly_rate)^12 - 1) × 100
+        monthly = Decimal(str(monthly_rate))
+        self.eir = MoneyCalculator.round_money(((1 + monthly) ** 12 - 1) * 100)
 
         # — fees from product
         if product:
@@ -4213,13 +4216,18 @@ class Loan(BaseModel):
 
             from dateutil.relativedelta import relativedelta
             freq = self.repayment_frequency
-            n    = self.number_of_installments
             if freq == 'daily':
-                self.final_repayment_date = start + timezone.timedelta(days=n)
+                # Advance n business days from start to find the final due date
+                d = self.first_repayment_date
+                for _ in range(n - 1):
+                    d = add_one_business_day(d)
+                self.final_repayment_date = d
             elif freq == 'weekly':
                 self.final_repayment_date = start + timezone.timedelta(weeks=n)
             elif freq == 'fortnightly':
                 self.final_repayment_date = start + timezone.timedelta(weeks=n * 2)
+            elif freq == 'yearly':
+                self.final_repayment_date = start + relativedelta(years=n)
             else:
                 self.final_repayment_date = start + relativedelta(months=n)
 
@@ -4227,11 +4235,14 @@ class Loan(BaseModel):
         from dateutil.relativedelta import relativedelta
         freq = self.repayment_frequency
         if freq == 'daily':
-            return from_date + timezone.timedelta(days=1)
+            # Move to the next Mon–Fri business day (skip Sat/Sun)
+            return add_one_business_day(from_date)
         elif freq == 'weekly':
             return from_date + timezone.timedelta(weeks=1)
         elif freq == 'fortnightly':
             return from_date + timezone.timedelta(weeks=2)
+        elif freq == 'yearly':
+            return from_date + relativedelta(years=1)
         return from_date + relativedelta(months=1)
 
     def get_repayment_schedule(self):
@@ -4337,6 +4348,14 @@ class Loan(BaseModel):
         self.save(update_fields=[
             'fees_paid', 'fees_paid_date', 'fees_transaction', 'status', 'updated_at'
         ])
+
+        # Create journal entry (Dr Cash / Cr Fee Income accounts)
+        try:
+            post_loan_upfront_fees_journal(self, processed_by, txn)
+            logger.info(f"Journal entry created for upfront fees: {self.loan_number}")
+        except Exception as e:
+            logger.error(f"Failed to create fee journal for loan {self.loan_number}: {str(e)}")
+
         return True, "Fees paid successfully"
 
 
@@ -4402,13 +4421,42 @@ class Loan(BaseModel):
             status='completed'
         )
 
+        # Persist repayment schedule rows (only if not already created)
+        try:
+            if not LoanRepaymentSchedule.objects.filter(loan=self).exists():
+                schedule_items = generate_repayment_schedule(self)
+            else:
+                schedule_items = []
+            if schedule_items:
+                schedule_objects = [
+                    LoanRepaymentSchedule(
+                        loan=self,
+                        installment_number=item['installment_number'],
+                        due_date=item['due_date'],
+                        principal_amount=item['principal_amount'],
+                        interest_amount=item['interest_amount'],
+                        total_amount=item['total_amount'],
+                        outstanding_amount=item['total_amount'],
+                        status='pending',
+                    )
+                    for item in schedule_items
+                ]
+                LoanRepaymentSchedule.objects.bulk_create(schedule_objects)
+                logger.info(
+                    f"Repayment schedule persisted for loan {self.loan_number}: "
+                    f"{len(schedule_objects)} installments"
+                )
+        except Exception as e:
+            logger.error(
+                f"Failed to persist repayment schedule for loan {self.loan_number}: {str(e)}"
+            )
+
         # Create journal entry (Dr Loan Receivable, Cr Cash)
         try:
             post_loan_disbursement_journal(self, disbursed_by)
             logger.info(f"Journal entry created for loan disbursement: {self.loan_number}")
         except Exception as e:
             logger.error(f"Failed to create journal entry for loan {self.loan_number}: {str(e)}")
-            # Continue even if journal entry fails - can be fixed later
 
         return True, "Loan disbursed successfully"
 
@@ -4476,6 +4524,16 @@ class Loan(BaseModel):
         self.amount_paid        += amount
         self.outstanding_balance -= amount
 
+        # --- clear accrued interest receivable ---
+        # How much of the interest_portion was previously accrued (Dr 1820).
+        # The journal will Cr 1820 for this amount instead of Cr 4010 (income)
+        # to avoid double-counting.
+        accrued_to_clear = min(interest_portion, self.accrued_interest_balance)
+        self.accrued_interest_balance = max(
+            Decimal('0.00'),
+            self.accrued_interest_balance - accrued_to_clear
+        )
+
         # --- last-payment snapshot ---
         self.last_payment_amount = amount
         self.last_payment_date   = timezone.now().date()
@@ -4492,8 +4550,17 @@ class Loan(BaseModel):
             self.outstanding_balance = Decimal('0.00')
             self.status             = 'completed'
             self.completion_date    = timezone.now()
-        elif self.next_repayment_date and self.next_repayment_date < timezone.now().date():
-            self.status = 'overdue'
+        elif self.next_repayment_date:
+            grace_days = (
+                self.loan_product.grace_period_days
+                if self.loan_product_id and self.loan_product
+                else 0
+            )
+            overdue_threshold = self.next_repayment_date + timezone.timedelta(days=grace_days)
+            if overdue_threshold < timezone.now().date():
+                self.status = 'overdue'
+            else:
+                self.status = 'active'
         else:
             self.status = 'active'
 
@@ -4515,7 +4582,8 @@ class Loan(BaseModel):
             status='completed'
         )
 
-        # Create journal entry (Dr Cash, Cr Loan Receivable + Interest Income)
+        # Create journal entry (Dr Cash, Cr Loan Receivable + Interest accounts)
+        # accrued_to_clear drives whether interest credits 1820 or 4010
         try:
             post_loan_repayment_journal(
                 loan=self,
@@ -4523,15 +4591,18 @@ class Loan(BaseModel):
                 principal_portion=principal_portion,
                 interest_portion=interest_portion,
                 processed_by=processed_by,
-                transaction_obj=txn
+                transaction_obj=txn,
+                accrued_interest_to_clear=accrued_to_clear,
             )
             logger.info(
                 f"Journal entry created for loan repayment: {self.loan_number}, "
-                f"Amount=₦{amount}, Principal=₦{principal_portion}, Interest=₦{interest_portion}"
+                f"Amount=₦{amount}, Principal=₦{principal_portion}, "
+                f"Interest=₦{interest_portion} (accrual cleared=₦{accrued_to_clear})"
             )
         except Exception as e:
-            logger.error(f"Failed to create journal entry for repayment {txn.transaction_ref}: {str(e)}")
-            # Continue even if journal entry fails - can be fixed later
+            logger.error(
+                f"Failed to create journal entry for repayment {txn.transaction_ref}: {str(e)}"
+            )
 
         return txn
 
@@ -4683,6 +4754,8 @@ class Transaction(BaseModel):
 
         # --- fees (individual lines, still usable) ---
         ('registration_fee',        'Client Registration Fee'),
+        ('id_card_fee',             'ID Card Fee'),
+        ('membership_card_fee',     'Membership Card Fee'),
         ('loan_insurance_fee',      'Loan Insurance Fee'),
         ('loan_form_fee',           'Loan Form Fee'),
         ('risk_premium',            'Risk Premium Fee'),
@@ -4700,6 +4773,8 @@ class Transaction(BaseModel):
     # -----------------------------------------------------------------------
     INCOME_TYPES = [
         'registration_fee',
+        'id_card_fee',
+        'membership_card_fee',
         'loan_insurance_fee',
         'loan_form_fee',
         'risk_premium',
@@ -5422,6 +5497,8 @@ class LoanRepaymentPosting(BaseModel):
 # =============================================================================
 
 class SavingsDepositPosting(BaseModel):
+    posting_type = 'deposit'  # used by templates to distinguish posting type
+
     """
     Savings Deposit Posting - Staff submit deposits that require approval
 
@@ -5685,6 +5762,8 @@ class SavingsDepositPosting(BaseModel):
 
 
 class SavingsWithdrawalPosting(BaseModel):
+    posting_type = 'withdrawal'  # used by templates to distinguish posting type
+
     """
     Savings Withdrawal Posting - Staff submit withdrawals that require approval
 
@@ -6210,6 +6289,8 @@ class JournalEntry(BaseModel):
         ('fee_collection', 'Fee Collection'),
         ('reversal', 'Reversal Entry'),
         ('adjustment', 'Adjustment Entry'),
+        ('insurance_payout', 'Insurance Payout'),
+        ('interbranch_transfer', 'Inter-Branch Transfer'),
     ]
     
     # =========================================================================
@@ -6556,7 +6637,9 @@ class Notification(BaseModel):
     NOTIFICATION_TYPE_CHOICES = [
         ('client_registered', 'New Client Registered'),
         ('client_approved', 'Client Approved'),
+        ('client_rejected', 'Client Rejected'),
         ('loan_applied', 'Loan Application Submitted'),
+        ('repayment_posted', 'Repayment Pending Approval'),
         ('loan_fees_paid', 'Loan Fees Paid'),
         ('loan_approved', 'Loan Approved'),
         ('loan_rejected', 'Loan Rejected'),
@@ -6583,6 +6666,19 @@ class Notification(BaseModel):
         ('group_unassigned', 'Group Unassigned from Staff'),
         ('client_unassigned', 'Client Unassigned'),
         ('clients_assigned', 'Multiple Clients Assigned'),
+        # Automated background job notifications
+        ('savings_maturity',  'Fixed Deposit Maturing'),
+        ('loan_penalty_applied', 'Automatic Penalty Applied'),
+        # Inter-branch transfers
+        ('transfer_requested',       'Transfer Requested'),
+        ('transfer_approved',        'Transfer Approved'),
+        ('transfer_rejected',        'Transfer Rejected'),
+        ('transfer_completed',       'Transfer Completed'),
+        # Insurance claims
+        ('insurance_claim_filed',    'Insurance Claim Filed'),
+        ('insurance_claim_approved', 'Insurance Claim Approved'),
+        ('insurance_claim_rejected', 'Insurance Claim Rejected'),
+        ('insurance_claim_paid',     'Insurance Claim Paid'),
     ]
 
     user = models.ForeignKey(
@@ -6762,6 +6858,31 @@ class Guarantor(BaseModel):
 
     id_type   = models.CharField(max_length=50, blank=True)
     id_number = models.CharField(max_length=50, blank=True)
+
+    id_card_front = CloudinaryField(
+        'id_card_front',
+        folder='guarantors/id_cards/front',
+        null=True,
+        blank=True,
+        resource_type='image',
+        help_text="Front of the guarantor's ID card"
+    )
+    id_card_back = CloudinaryField(
+        'id_card_back',
+        folder='guarantors/id_cards/back',
+        null=True,
+        blank=True,
+        resource_type='image',
+        help_text="Back of the guarantor's ID card"
+    )
+    signature = CloudinaryField(
+        'signature',
+        folder='guarantors/signatures',
+        null=True,
+        blank=True,
+        resource_type='image',
+        help_text="Guarantor's signature image"
+    )
 
     # =========================================================================
     # NOTES
@@ -7971,6 +8092,474 @@ class LoanRestructureRequest(BaseModel, ApprovalWorkflowMixin):
     
     def __str__(self):
         return f"Restructure: {self.loan.loan_number} - {self.get_restructure_type_display()}"
+
+
+# =============================================================================
+# BANK / CASH RECONCILIATION
+# =============================================================================
+
+class BankReconciliation(BaseModel):
+    """
+    Bank / Cash Reconciliation Session.
+
+    Tracks matching of GL journal lines against physical bank statement
+    lines to identify discrepancies.  No journal entries are auto-posted
+    here — correcting journals must be created manually via the journal
+    entry view.
+    """
+
+    STATUS_CHOICES = [
+        ('draft',       'Draft'),
+        ('in_progress', 'In Progress'),
+        ('completed',   'Completed'),
+    ]
+
+    recon_ref = models.CharField(
+        max_length=50,
+        unique=True,
+        db_index=True,
+        help_text="Auto-generated reference, e.g. RECON-20250101-1010"
+    )
+    gl_account = models.ForeignKey(
+        'ChartOfAccounts',
+        on_delete=models.PROTECT,
+        related_name='reconciliations',
+        limit_choices_to={'is_active': True},
+        help_text="GL account being reconciled (e.g. 1010, 1020)"
+    )
+    branch = models.ForeignKey(
+        'Branch',
+        on_delete=models.PROTECT,
+        related_name='reconciliations'
+    )
+    period_start = models.DateField(help_text="Start of the reconciliation period")
+    period_end = models.DateField(help_text="End of the reconciliation period")
+    opening_balance = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="GL balance at period_start"
+    )
+    bank_statement_closing_balance = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Closing balance per bank statement"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='draft',
+        db_index=True
+    )
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        'User',
+        on_delete=models.PROTECT,
+        related_name='created_reconciliations'
+    )
+    completed_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='completed_reconciliations'
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-period_end', '-created_at']
+        verbose_name = "Bank Reconciliation"
+        verbose_name_plural = "Bank Reconciliations"
+
+    def __str__(self):
+        return f"{self.recon_ref} ({self.get_status_display()})"
+
+    def save(self, *args, **kwargs):
+        if not self.recon_ref:
+            self.recon_ref = self._generate_recon_ref()
+        super().save(*args, **kwargs)
+
+    def _generate_recon_ref(self):
+        from django.utils import timezone as tz
+        date_str = tz.now().strftime('%Y%m%d')
+        gl_code = self.gl_account.gl_code if self.gl_account_id else 'XXXX'
+        base = f"RECON-{date_str}-{gl_code}"
+        ref = base
+        suffix = 1
+        while BankReconciliation.objects.filter(recon_ref=ref).exists():
+            ref = f"{base}-{suffix}"
+            suffix += 1
+        return ref
+
+    def get_gl_closing_balance(self):
+        """Calculate GL closing balance for the reconciliation period."""
+        from django.db.models import Sum as _Sum
+        lines = JournalEntryLine.objects.filter(
+            account=self.gl_account,
+            journal_entry__status='posted',
+            journal_entry__transaction_date__lte=self.period_end,
+        )
+        total_debits  = lines.aggregate(t=_Sum('debit_amount'))['t']  or Decimal('0.00')
+        total_credits = lines.aggregate(t=_Sum('credit_amount'))['t'] or Decimal('0.00')
+        return self.opening_balance + total_debits - total_credits
+
+    def get_difference(self):
+        """GL closing balance minus bank statement closing balance."""
+        return self.get_gl_closing_balance() - self.bank_statement_closing_balance
+
+    def is_complete_eligible(self):
+        """Can only mark complete when no unmatched bank statement lines remain."""
+        return not self.lines.filter(status='unmatched').exists()
+
+
+class BankStatementLine(BaseModel):
+    """
+    A single line from a physical bank statement entered manually.
+    Matched to a JournalEntryLine to confirm the GL agrees with the bank.
+    """
+
+    STATUS_CHOICES = [
+        ('unmatched', 'Unmatched'),
+        ('matched',   'Matched'),
+        ('disputed',  'Disputed'),
+    ]
+
+    reconciliation = models.ForeignKey(
+        BankReconciliation,
+        on_delete=models.CASCADE,
+        related_name='lines'
+    )
+    line_date = models.DateField()
+    description = models.CharField(max_length=300)
+    reference = models.CharField(max_length=100, blank=True)
+    debit_amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Money leaving the bank account"
+    )
+    credit_amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Money entering the bank account"
+    )
+    matched_gl_line = models.ForeignKey(
+        'JournalEntryLine',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bank_statement_matches',
+        help_text="Matched GL journal line"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='unmatched',
+        db_index=True
+    )
+    notes = models.CharField(max_length=300, blank=True)
+
+    class Meta:
+        ordering = ['line_date', 'id']
+        verbose_name = "Bank Statement Line"
+        verbose_name_plural = "Bank Statement Lines"
+        constraints = [
+            models.UniqueConstraint(
+                fields=['matched_gl_line'],
+                condition=models.Q(matched_gl_line__isnull=False),
+                name='unique_gl_line_match'
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.line_date} | {self.description[:40]} | {self.status}"
+
+    def clean(self):
+        super().clean()
+        debit  = self.debit_amount  or Decimal('0.00')
+        credit = self.credit_amount or Decimal('0.00')
+        if debit > 0 and credit > 0:
+            raise ValidationError(
+                "A bank statement line cannot have both a debit and credit amount."
+            )
+        if debit == 0 and credit == 0:
+            raise ValidationError(
+                "A bank statement line must have either a debit or credit amount."
+            )
+
+
+# =============================================================================
+# LOAN INSURANCE CLAIMS
+# =============================================================================
+
+class LoanInsuranceClaim(BaseModel):
+    """
+    Insurance claim filed against a loan where insurance fees were collected.
+
+    Status flow: submitted → under_review → approved → paid (or rejected).
+
+    On approval + payout recording, a journal entry clears the loan receivable:
+        Dr 1010 Cash In Hand              [payout_amount]
+        Cr 1810 Loan Receivable           [min(payout, outstanding)]
+        Cr 1820 Interest Receivable       [remainder, if any]
+    """
+
+    CLAIM_TYPE_CHOICES = [
+        ('death',            'Death of Borrower'),
+        ('disability',       'Permanent Disability'),
+        ('fire',             'Fire / Property Damage'),
+        ('theft',            'Theft / Burglary'),
+        ('natural_disaster', 'Natural Disaster'),
+        ('other',            'Other'),
+    ]
+
+    STATUS_CHOICES = [
+        ('submitted',    'Submitted'),
+        ('under_review', 'Under Review'),
+        ('approved',     'Approved'),
+        ('rejected',     'Rejected'),
+        ('paid',         'Paid Out'),
+    ]
+
+    claim_ref = models.CharField(
+        max_length=50,
+        unique=True,
+        db_index=True,
+        help_text="Auto-generated, e.g. CLAIM-LN2025001-001"
+    )
+    loan = models.ForeignKey(
+        'Loan',
+        on_delete=models.PROTECT,
+        related_name='insurance_claims'
+    )
+    claim_type = models.CharField(max_length=30, choices=CLAIM_TYPE_CHOICES)
+    event_date = models.DateField(help_text="Date the insured event occurred")
+    claim_amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.01'))],
+        help_text="Amount being claimed (defaults to loan outstanding balance)"
+    )
+    payout_amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0.01'))],
+        help_text="Actual payout received from insurer"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='submitted',
+        db_index=True
+    )
+    description = models.TextField(help_text="Details about the insured event")
+    document_references = models.TextField(
+        blank=True,
+        help_text="Notes about supporting documents submitted"
+    )
+    filed_by = models.ForeignKey(
+        'User',
+        on_delete=models.PROTECT,
+        related_name='insurance_claims_filed'
+    )
+    reviewed_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='insurance_claims_reviewed'
+    )
+    review_notes = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    paid_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='insurance_claims_paid'
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+    payout_journal = models.ForeignKey(
+        'JournalEntry',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='insurance_payouts',
+        help_text="Journal entry posted when payout is recorded"
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Loan Insurance Claim"
+        verbose_name_plural = "Loan Insurance Claims"
+
+    def __str__(self):
+        return f"{self.claim_ref} — {self.get_status_display()}"
+
+    def save(self, *args, **kwargs):
+        if not self.claim_ref:
+            self.claim_ref = self._generate_claim_ref()
+        super().save(*args, **kwargs)
+
+    def _generate_claim_ref(self):
+        loan_num = self.loan.loan_number if self.loan_id else 'UNKNOWN'
+        base = f"CLAIM-{loan_num}"
+        count = LoanInsuranceClaim.objects.filter(loan_id=self.loan_id).count() + 1
+        ref = f"{base}-{count:03d}"
+        while LoanInsuranceClaim.objects.filter(claim_ref=ref).exists():
+            count += 1
+            ref = f"{base}-{count:03d}"
+        return ref
+
+
+# =============================================================================
+# INTER-BRANCH TRANSFER
+# =============================================================================
+
+class InterBranchTransfer(BaseModel):
+    """
+    Cash transfer between two branches.
+
+    Two journal entries are posted during the lifecycle:
+      1. On approval (at source branch):
+            Dr 1950 Interbranch Transfer Clearing   [amount]
+            Cr 1010 Cash In Hand                    [amount]
+      2. On completion (at destination branch):
+            Dr 1010 Cash In Hand                    [amount]
+            Cr 1950 Interbranch Transfer Clearing   [amount]
+    """
+
+    STATUS_CHOICES = [
+        ('pending',   'Pending Approval'),
+        ('approved',  'Approved — In Transit'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+        ('rejected',  'Rejected'),
+    ]
+
+    transfer_ref = models.CharField(
+        max_length=50,
+        unique=True,
+        db_index=True,
+        help_text="Auto-generated, e.g. TRF-20250101-001"
+    )
+    from_branch = models.ForeignKey(
+        'Branch',
+        on_delete=models.PROTECT,
+        related_name='outgoing_transfers'
+    )
+    to_branch = models.ForeignKey(
+        'Branch',
+        on_delete=models.PROTECT,
+        related_name='incoming_transfers'
+    )
+    amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('1.00'))],
+        help_text="Amount to transfer"
+    )
+    purpose = models.CharField(max_length=300)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        db_index=True
+    )
+    requested_by = models.ForeignKey(
+        'User',
+        on_delete=models.PROTECT,
+        related_name='transfers_requested'
+    )
+    approved_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transfers_approved'
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transfers_completed',
+        help_text="Person confirming receipt at destination branch"
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    rejected_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transfers_rejected'
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
+    source_journal = models.ForeignKey(
+        'JournalEntry',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transfer_source',
+        help_text="Journal posted at source branch on approval"
+    )
+    destination_journal = models.ForeignKey(
+        'JournalEntry',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transfer_destination',
+        help_text="Journal posted at destination branch on completion"
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Inter-Branch Transfer"
+        verbose_name_plural = "Inter-Branch Transfers"
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(amount__gte=Decimal('1.00')),
+                name='transfer_amount_positive'
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.transfer_ref}: {self.from_branch} → {self.to_branch}"
+
+    def clean(self):
+        super().clean()
+        if self.from_branch_id and self.to_branch_id:
+            if self.from_branch_id == self.to_branch_id:
+                raise ValidationError(
+                    "Source and destination branch cannot be the same."
+                )
+
+    def save(self, *args, **kwargs):
+        if not self.transfer_ref:
+            self.transfer_ref = self._generate_transfer_ref()
+        super().save(*args, **kwargs)
+
+    def _generate_transfer_ref(self):
+        from django.utils import timezone as tz
+        date_str = tz.now().strftime('%Y%m%d')
+        base = f"TRF-{date_str}"
+        count = InterBranchTransfer.objects.filter(
+            transfer_ref__startswith=base
+        ).count() + 1
+        ref = f"{base}-{count:03d}"
+        while InterBranchTransfer.objects.filter(transfer_ref=ref).exists():
+            count += 1
+            ref = f"{base}-{count:03d}"
+        return ref
 
 
 

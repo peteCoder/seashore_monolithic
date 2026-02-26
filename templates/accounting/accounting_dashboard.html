@@ -6,7 +6,7 @@
 <div class="p-6">
     <!-- Page Header -->
     <div class="mb-8">
-        <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Accounting Dashboard</h1>
+        <h1 class="text-xl font-bold text-gray-900 dark:text-white">Accounting Dashboard</h1>
         <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
             Monitor financial health, manage accounts, and generate reports
         </p>
@@ -37,7 +37,7 @@
             <div class="flex items-center justify-between">
                 <div class="flex-1">
                     <p class="text-sm font-medium text-green-800 dark:text-green-300 uppercase tracking-wider">Cash Balance</p>
-                    <p class="mt-3 text-3xl font-bold text-green-900 dark:text-green-100">
+                    <p class="mt-3 text-xl font-bold text-green-900 dark:text-green-100">
                         ₦{{ cash_balance|floatformat:2|intcomma }}
                     </p>
                     <p class="mt-2 text-xs text-green-700 dark:text-green-400">GL Code: 1010</p>
@@ -53,7 +53,7 @@
             <div class="flex items-center justify-between">
                 <div class="flex-1">
                     <p class="text-sm font-medium text-blue-800 dark:text-blue-300 uppercase tracking-wider">Total Journals</p>
-                    <p class="mt-3 text-3xl font-bold text-blue-900 dark:text-blue-100">
+                    <p class="mt-3 text-xl font-bold text-blue-900 dark:text-blue-100">
                         {{ total_journals|intcomma }}
                     </p>
                     <p class="mt-2 text-xs text-blue-700 dark:text-blue-400">All time entries</p>
@@ -69,7 +69,7 @@
             <div class="flex items-center justify-between">
                 <div class="flex-1">
                     <p class="text-sm font-medium text-orange-800 dark:text-orange-300 uppercase tracking-wider">Unposted</p>
-                    <p class="mt-3 text-3xl font-bold text-orange-900 dark:text-orange-100">
+                    <p class="mt-3 text-xl font-bold text-orange-900 dark:text-orange-100">
                         {{ unposted_journals }}
                     </p>
                     <p class="mt-2 text-xs text-orange-700 dark:text-orange-400">Awaiting approval</p>
@@ -85,7 +85,7 @@
             <div class="flex items-center justify-between">
                 <div class="flex-1">
                     <p class="text-sm font-medium text-purple-800 dark:text-purple-300 uppercase tracking-wider">Posted Today</p>
-                    <p class="mt-3 text-3xl font-bold text-purple-900 dark:text-purple-100">
+                    <p class="mt-3 text-xl font-bold text-purple-900 dark:text-purple-100">
                         {{ posted_today }}
                     </p>
                     <p class="mt-2 text-xs text-purple-700 dark:text-purple-400">{{ "now"|date:"M d, Y" }}</p>

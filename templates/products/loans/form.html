@@ -60,12 +60,20 @@
                     {% if form.loan_type.errors %}
                     <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.loan_type.errors.0 }}</p>
                     {% endif %}
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Classifies the loan for reporting and eligibility. Changing this will suggest a default repayment frequency below.
+                    </p>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        GL Code
+                    <label for="{{ form.gl_code.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        GL Account
                     </label>
                     {{ form.gl_code }}
+                    <p id="glCodeHint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Auto-suggested from Loan Type — you can override.
+                    </p>
                     {% if form.gl_code.errors %}
                     <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.gl_code.errors.0 }}</p>
                     {% endif %}
@@ -108,6 +116,10 @@
                     {% if form.interest_calculation_method.errors %}
                     <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.interest_calculation_method.errors.0 }}</p>
                     {% endif %}
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <strong>Flat Rate:</strong> interest = P &times; R &times; T (same amount each month).
+                        <strong>Reducing Balance:</strong> interest charged only on the outstanding principal — earlier installments have more interest, later ones more principal. Total interest is lower.
+                    </p>
                 </div>
             </div>
         </div>
@@ -286,6 +298,19 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Repayment Frequency
+                    </label>
+                    {{ form.repayment_frequency }}
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        How often borrowers make installment payments. <strong>Does not affect interest calculation</strong> (interest is always P&times;R&times;T where T is months).
+                        Auto-suggested from Loan Type &mdash; you can override.
+                    </p>
+                    {% if form.repayment_frequency.errors %}
+                    <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.repayment_frequency.errors.0 }}</p>
+                    {% endif %}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         Grace Period (Days)
                     </label>
                     {{ form.grace_period_days }}
@@ -325,4 +350,91 @@
         </div>
     </form>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/**
+ * Loan Product Form — Auto-suggest repayment frequency and GL code from loan type.
+ *
+ * Loan Type           = WHAT the loan is (category, reporting, eligibility).
+ * Repayment Frequency = HOW OFTEN installments are collected (payment schedule).
+ * GL Code             = Accounting ledger bucket for this product's transactions.
+ *
+ * Both are only suggested — the user can override either at any time.
+ */
+(function () {
+    var FREQ_DEFAULTS = {
+        'thrift':         'daily',
+        'group':          'weekly',
+        'emergency':      'monthly',
+        'med':            'monthly',
+        'business':       'monthly',
+        'salary_advance': 'monthly',
+        'asset_finance':  'monthly',
+        'agricultural':   'monthly',
+    };
+
+    // GL code suggestions per loan type — matched to Chart of Accounts.
+    var GL_DEFAULTS = {
+        'thrift':         { code: '1810', label: 'Loan Receivable - Principal' },
+        'group':          { code: '1810', label: 'Loan Receivable - Principal' },
+        'med':            { code: '1840', label: 'Loan Receivable - MED Clients' },
+        'business':       { code: '1810', label: 'Loan Receivable - Principal' },
+        'emergency':      { code: '1810', label: 'Loan Receivable - Principal' },
+        'salary_advance': { code: '1810', label: 'Loan Receivable - Principal' },
+        'asset_finance':  { code: '1810', label: 'Loan Receivable - Principal' },
+        'agricultural':   { code: '1810', label: 'Loan Receivable - Principal' },
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        var loanTypeEl = document.getElementById('id_loan_type');
+        var freqEl     = document.getElementById('id_repayment_frequency');
+        var glCodeEl   = document.getElementById('id_gl_code');
+        var glHintEl   = document.getElementById('glCodeHint');
+
+        if (!loanTypeEl) return;
+
+        loanTypeEl.addEventListener('change', function () {
+            var val = this.value;
+
+            // ── Repayment frequency ───────────────────────────────────────────
+            if (freqEl) {
+                var suggestedFreq = FREQ_DEFAULTS[val];
+                if (suggestedFreq) freqEl.value = suggestedFreq;
+            }
+
+            // ── GL Code ───────────────────────────────────────────────────────
+            if (glCodeEl && glHintEl) {
+                var gl = GL_DEFAULTS[val];
+                if (gl) {
+                    // Only fill if the field is currently empty (don't clobber manual entry)
+                    if (!glCodeEl.value.trim()) {
+                        glCodeEl.value = gl.code;
+                    }
+                    glHintEl.innerHTML =
+                        '<i class="fas fa-magic mr-1 text-primary-500"></i>' +
+                        'Suggested: <strong>' + gl.code + '</strong> — ' + gl.label +
+                        ' &nbsp;<span class="text-gray-400">(you can override)</span>';
+                } else {
+                    glHintEl.innerHTML =
+                        '<i class="fas fa-info-circle mr-1"></i>' +
+                        'Auto-suggested from Loan Type — you can override.';
+                }
+            }
+        });
+
+        // On page load, if a loan type is already selected (edit mode), update the hint
+        if (loanTypeEl.value && glHintEl) {
+            var gl = GL_DEFAULTS[loanTypeEl.value];
+            if (gl && glCodeEl && glCodeEl.value) {
+                glHintEl.innerHTML =
+                    '<i class="fas fa-magic mr-1 text-primary-500"></i>' +
+                    'Suggested: <strong>' + gl.code + '</strong> — ' + gl.label +
+                    ' &nbsp;<span class="text-gray-400">(you can override)</span>';
+            }
+        }
+    });
+}());
+</script>
 {% endblock %}

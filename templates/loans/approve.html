@@ -44,7 +44,7 @@
             </div>
             <div>
                 <p class="text-sm text-gray-600 dark:text-gray-400">Interest Rate</p>
-                <p class="text-base font-medium text-gray-900 dark:text-white">{{ loan.loan_product.monthly_interest_rate }}% per month</p>
+                <p class="text-base font-medium text-gray-900 dark:text-white">{{ loan.monthly_interest_rate_pct|floatformat:2 }}% per month</p>
             </div>
             <div>
                 <p class="text-sm text-gray-600 dark:text-gray-400">Duration</p>
@@ -55,7 +55,7 @@
                 <p class="text-base font-medium text-gray-900 dark:text-white">₦{{ loan.total_repayment|floatformat:2|intcomma }}</p>
             </div>
             <div>
-                <p class="text-sm text-gray-600 dark:text-gray-400">Monthly Installment</p>
+                <p class="text-sm text-gray-600 dark:text-gray-400">{{ loan.get_repayment_frequency_display }} Installment</p>
                 <p class="text-base font-medium text-gray-900 dark:text-white">₦{{ loan.installment_amount|floatformat:2|intcomma }}</p>
             </div>
             {% if loan.purpose %}

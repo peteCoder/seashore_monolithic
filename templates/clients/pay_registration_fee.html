@@ -44,20 +44,39 @@
         </div>
     </div>
 
-    <!-- Fee Information Notice -->
-    <div class="bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 p-4 mb-6">
-        <div class="flex">
-            <div class="flex-shrink-0">
-                <i class="fas fa-info-circle text-blue-400"></i>
-            </div>
-            <div class="ml-3">
-                <h3 class="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">Registration Fee</h3>
-                <div class="text-sm text-blue-700 dark:text-blue-300">
-                    <p class="mb-2">The client registration fee is <strong>₦{{ registration_fee|floatformat:2|intcomma }}</strong></p>
-                    <p>This is a one-time payment required before the client can be activated in the system.</p>
-                </div>
-            </div>
-        </div>
+    <!-- Fee Breakdown Card -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">
+            <i class="fas fa-receipt text-primary-600 dark:text-primary-400 mr-2"></i>
+            Fee Breakdown
+        </h2>
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-200 dark:border-gray-700">
+                    <th class="text-left text-gray-600 dark:text-gray-400 font-medium pb-2">Item</th>
+                    <th class="text-right text-gray-600 dark:text-gray-400 font-medium pb-2">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in fee_breakdown %}
+                <tr class="border-b border-gray-100 dark:border-gray-700/50">
+                    <td class="py-3 text-gray-800 dark:text-gray-200">{{ item.label }}</td>
+                    <td class="py-3 text-right text-gray-800 dark:text-gray-200 font-mono">₦{{ item.amount|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="bg-gray-50 dark:bg-gray-700/40">
+                    <td class="pt-3 pb-2 px-0 font-bold text-gray-900 dark:text-white">Total</td>
+                    <td class="pt-3 pb-2 px-0 text-right font-bold text-gray-900 dark:text-white font-mono text-base">₦{{ registration_fee|floatformat:2|intcomma }}</td>
+                </tr>
+            </tfoot>
+        </table>
+        <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            <i class="fas fa-info-circle mr-1"></i>
+            Each item is recorded as a separate transaction with its own journal entry.
+            This is a one-time payment required before the client can be activated.
+        </p>
     </div>
 
     <!-- Payment Form -->
@@ -65,11 +84,11 @@
         <form method="post">
             {% csrf_token %}
 
-            <!-- Registration Fee Amount (Read-only) -->
+            <!-- Total Amount (Read-only) -->
             <div class="mb-6 bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">Registration Fee Amount</p>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Amount to Collect</p>
                         <p class="text-3xl font-bold text-gray-900 dark:text-white">₦{{ registration_fee|floatformat:2|intcomma }}</p>
                     </div>
                     <div class="h-16 w-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
@@ -123,7 +142,10 @@
                     <div class="ml-3">
                         <h3 class="text-sm font-medium text-yellow-800 dark:text-yellow-300 mb-1">Confirmation Required</h3>
                         <p class="text-sm text-yellow-700 dark:text-yellow-300">
-                            By confirming this payment, you certify that you have received ₦{{ registration_fee|floatformat:2|intcomma }} from the client as their registration fee.
+                            By confirming this payment, you certify that you have collected the following from <strong>{{ client.get_full_name }}</strong>:
+                            {% for item in fee_breakdown %}<br>
+                            &bull; {{ item.label }}: ₦{{ item.amount|floatformat:2|intcomma }}{% endfor %}<br><br>
+                            <strong>Total: ₦{{ registration_fee|floatformat:2|intcomma }}</strong>
                         </p>
                     </div>
                 </div>

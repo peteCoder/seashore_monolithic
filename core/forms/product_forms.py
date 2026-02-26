@@ -7,8 +7,23 @@ Forms for managing loan and savings products
 
 from django import forms
 from django.core.exceptions import ValidationError
-from decimal import Decimal
-from core.models import LoanProduct, SavingsProduct
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from core.models import LoanProduct, SavingsProduct, ChartOfAccounts
+
+# Rate fields stored as decimal fractions in the DB (0.035 = 3.5%).
+# The form displays and accepts them as percentages (3.5) and converts on save.
+_DECIMAL_PCT_FIELDS = [
+    'monthly_interest_rate',
+    'risk_premium_rate',
+    'rp_income_rate',
+    'tech_fee_rate',
+    'early_repayment_penalty_rate',
+]
+
+# Amount fields where users may type comma thousand-separators (e.g. 1,000,000).
+_AMOUNT_FIELDS = [
+    'min_principal_amount', 'max_principal_amount', 'loan_form_fee_amount',
+]
 
 
 # CSS Classes for form widgets
@@ -37,6 +52,7 @@ class LoanProductForm(forms.ModelForm):
             'min_principal_amount', 'max_principal_amount',
             'min_duration_months', 'max_duration_months',
             'allow_early_repayment', 'early_repayment_penalty_rate', 'grace_period_days',
+            'repayment_frequency',
         ]
 
         widgets = {
@@ -54,37 +70,37 @@ class LoanProductForm(forms.ModelForm):
                 'placeholder': 'Product description and features',
             }),
             'loan_type': forms.Select(attrs={'class': SELECT_CLASS}),
-            'gl_code': forms.TextInput(attrs={
-                'class': TEXT_INPUT_CLASS,
-                'placeholder': 'GL code for accounting',
-            }),
+            # gl_code — overridden as ChoiceField in __init__; no widget entry needed here
             'monthly_interest_rate': forms.NumberInput(attrs={
                 'class': TEXT_INPUT_CLASS,
-                'step': '0.0001',
-                'placeholder': '0.0350 (3.5%)',
+                'step': '0.01',
+                'placeholder': '3.50',
             }),
             'annual_interest_rate': forms.NumberInput(attrs={
                 'class': TEXT_INPUT_CLASS,
                 'step': '0.01',
-                'placeholder': '42.00 (42%)',
+                'placeholder': '42.00',
             }),
             'interest_calculation_method': forms.Select(attrs={'class': SELECT_CLASS}),
             'risk_premium_enabled': forms.CheckboxInput(attrs={'class': CHECKBOX_CLASS}),
             'risk_premium_rate': forms.NumberInput(attrs={
                 'class': TEXT_INPUT_CLASS,
-                'step': '0.0001',
+                'step': '0.01',
+                'placeholder': '1.50',
             }),
             'risk_premium_calculation': forms.Select(attrs={'class': SELECT_CLASS}),
             'rp_income_enabled': forms.CheckboxInput(attrs={'class': CHECKBOX_CLASS}),
             'rp_income_rate': forms.NumberInput(attrs={
                 'class': TEXT_INPUT_CLASS,
-                'step': '0.0001',
+                'step': '0.01',
+                'placeholder': '1.50',
             }),
             'rp_income_calculation': forms.Select(attrs={'class': SELECT_CLASS}),
             'tech_fee_enabled': forms.CheckboxInput(attrs={'class': CHECKBOX_CLASS}),
             'tech_fee_rate': forms.NumberInput(attrs={
                 'class': TEXT_INPUT_CLASS,
-                'step': '0.0001',
+                'step': '0.01',
+                'placeholder': '1.50',
             }),
             'tech_fee_calculation': forms.Select(attrs={'class': SELECT_CLASS}),
             'loan_form_fee_enabled': forms.CheckboxInput(attrs={'class': CHECKBOX_CLASS}),
@@ -109,12 +125,56 @@ class LoanProductForm(forms.ModelForm):
             'allow_early_repayment': forms.CheckboxInput(attrs={'class': CHECKBOX_CLASS}),
             'early_repayment_penalty_rate': forms.NumberInput(attrs={
                 'class': TEXT_INPUT_CLASS,
-                'step': '0.0001',
+                'step': '0.01',
+                'placeholder': '0.00',
             }),
             'grace_period_days': forms.NumberInput(attrs={
                 'class': TEXT_INPUT_CLASS,
             }),
+            'repayment_frequency': forms.Select(attrs={'class': SELECT_CLASS}),
         }
+
+    # Override gl_code as a ChoiceField so users pick from the Chart of Accounts
+    gl_code = forms.ChoiceField(
+        required=False,
+        widget=forms.Select(attrs={'class': SELECT_CLASS}),
+        label='GL Account',
+        help_text='The general ledger account this loan product posts income/balances to.',
+    )
+
+    def __init__(self, *args, **kwargs):
+        # Strip commas from amount fields before Django parses them
+        # (users sometimes type "1,000,000" with thousand separators).
+        if args:
+            data = args[0]
+            if hasattr(data, 'copy'):
+                data = data.copy()
+                for fname in _AMOUNT_FIELDS:
+                    if fname in data:
+                        data[fname] = str(data[fname]).replace(',', '')
+                args = (data,) + args[1:]
+
+        super().__init__(*args, **kwargs)
+
+        # Build dropdown choices from active ChartOfAccounts records
+        # Displayed as: "1010 — Cash In Hand"
+        gl_choices = [('', '— Select GL Account (optional) —')]
+        accounts = (
+            ChartOfAccounts.objects
+            .filter(is_active=True)
+            .order_by('gl_code')
+            .values_list('gl_code', 'account_name')
+        )
+        gl_choices += [(code, f'{code} \u2014 {name}') for code, name in accounts]
+        self.fields['gl_code'].choices = gl_choices
+
+        # Rate fields are stored in the DB as decimal fractions (0.035 = 3.5%).
+        # Multiply by 100 so the form shows and accepts plain percentages (3.5).
+        if self.instance and self.instance.pk:
+            for fname in _DECIMAL_PCT_FIELDS:
+                val = getattr(self.instance, fname, None)
+                if val is not None:
+                    self.initial[fname] = (Decimal(str(val)) * 100).normalize()
 
     def clean_code(self):
         """Validate code uniqueness"""
@@ -127,6 +187,34 @@ class LoanProductForm(forms.ModelForm):
             if queryset.exists():
                 raise ValidationError("A loan product with this code already exists.")
         return code
+
+    # -------------------------------------------------------------------------
+    # Rate-field converters: user enters percentage (3.5), we store fraction (0.035)
+    # -------------------------------------------------------------------------
+    def _pct_to_fraction(self, fname):
+        """Convert a percentage value entered by the user to a 4-dp decimal fraction."""
+        val = self.cleaned_data.get(fname)
+        if val is None:
+            return val
+        try:
+            return (Decimal(str(val)) / 100).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            raise ValidationError("Enter a valid percentage (e.g. 3.5 for 3.5%).")
+
+    def clean_monthly_interest_rate(self):
+        return self._pct_to_fraction('monthly_interest_rate')
+
+    def clean_risk_premium_rate(self):
+        return self._pct_to_fraction('risk_premium_rate')
+
+    def clean_rp_income_rate(self):
+        return self._pct_to_fraction('rp_income_rate')
+
+    def clean_tech_fee_rate(self):
+        return self._pct_to_fraction('tech_fee_rate')
+
+    def clean_early_repayment_penalty_rate(self):
+        return self._pct_to_fraction('early_repayment_penalty_rate')
 
     def clean(self):
         """Cross-field validation"""

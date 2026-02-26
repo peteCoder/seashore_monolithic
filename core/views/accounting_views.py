@@ -22,7 +22,7 @@ from datetime import timedelta, datetime
 
 from core.models import (
     ChartOfAccounts, JournalEntry, JournalEntryLine,
-    Transaction, Branch, AccountType, AccountCategory
+    Transaction, Branch, AccountType, AccountCategory, Loan
 )
 from core.forms.accounting_forms import (
     DateRangeForm, TrialBalanceForm, ProfitLossForm, BalanceSheetForm,
@@ -1257,3 +1257,569 @@ def report_transaction_audit(request):
     }
 
     return render(request, 'accounting/report_transaction_audit.html', context)
+
+
+# =============================================================================
+# PAR AGING REPORT
+# =============================================================================
+
+@login_required
+def report_par_aging(request):
+    """
+    Portfolio at Risk (PAR) Aging Report
+
+    Buckets all active/overdue loans by days past due:
+      - Current (0 days)
+      - PAR 1–30
+      - PAR 31–60
+      - PAR 61–90
+      - PAR 90+
+
+    Permissions: Manager, Director, Admin
+    """
+    checker = PermissionChecker(request.user)
+    if not (checker.is_manager() or checker.is_director() or checker.is_admin()):
+        messages.error(request, 'You do not have permission to view this report.')
+        raise PermissionDenied
+
+    today = timezone.now().date()
+
+    # Branch filter
+    branch_id = request.GET.get('branch')
+    loans_qs = (
+        Loan.objects.filter(status__in=['active', 'overdue'])
+        .select_related('client', 'branch', 'loan_product')
+        .exclude(outstanding_balance__lte=Decimal('0.01'))
+    )
+    if branch_id:
+        loans_qs = loans_qs.filter(branch_id=branch_id)
+
+    loans = list(loans_qs)
+
+    buckets = {
+        'current': [],
+        'par_1_30': [],
+        'par_31_60': [],
+        'par_61_90': [],
+        'par_90plus': [],
+    }
+
+    for loan in loans:
+        if loan.status == 'active':
+            # Check whether technically overdue (grace not yet expired)
+            if loan.next_repayment_date:
+                grace_days = (
+                    loan.loan_product.grace_period_days
+                    if loan.loan_product_id and loan.loan_product
+                    else 0
+                )
+                overdue_from = loan.next_repayment_date + timedelta(days=grace_days)
+                if overdue_from < today:
+                    days = (today - overdue_from).days
+                else:
+                    days = 0
+            else:
+                days = 0
+        else:
+            days = loan.days_overdue
+
+        if days == 0:
+            buckets['current'].append((loan, days))
+        elif days <= 30:
+            buckets['par_1_30'].append((loan, days))
+        elif days <= 60:
+            buckets['par_31_60'].append((loan, days))
+        elif days <= 90:
+            buckets['par_61_90'].append((loan, days))
+        else:
+            buckets['par_90plus'].append((loan, days))
+
+    def _bucket_summary(items):
+        count = len(items)
+        balance = sum(loan.outstanding_balance for loan, _ in items)
+        return {'count': count, 'balance': balance, 'items': items}
+
+    summary = {k: _bucket_summary(v) for k, v in buckets.items()}
+    total_balance = sum(s['balance'] for s in summary.values())
+    total_count = sum(s['count'] for s in summary.values())
+
+    # Add percentage to each bucket
+    for s in summary.values():
+        s['pct'] = (
+            round(float(s['balance']) / float(total_balance) * 100, 1)
+            if total_balance else 0
+        )
+
+    # PAR ratio = (PAR 1+ balance) / total * 100
+    par_balance = total_balance - summary['current']['balance']
+    par_ratio = round(float(par_balance) / float(total_balance) * 100, 1) if total_balance else 0
+
+    branches = Branch.objects.filter(is_active=True).order_by('name')
+
+    context = {
+        'page_title': 'Portfolio at Risk (PAR) Aging Report',
+        'today': today,
+        'summary': summary,
+        'total_balance': total_balance,
+        'total_count': total_count,
+        'par_balance': par_balance,
+        'par_ratio': par_ratio,
+        'branches': branches,
+        'selected_branch': branch_id,
+    }
+
+    return render(request, 'accounting/report_par_aging.html', context)
+
+
+# =============================================================================
+# LOAN OFFICER PERFORMANCE REPORT
+# =============================================================================
+
+@login_required
+def report_loan_officer_performance(request):
+    """
+    Loan Officer Performance Report
+
+    For each staff member: loans disbursed, total disbursement amount,
+    repayments collected, total collected, active client count, overdue loan count.
+
+    Permissions: Manager, Director, Admin
+    """
+    from core.models import User, SavingsAccount
+    checker = PermissionChecker(request.user)
+    if not (checker.is_manager() or checker.is_director() or checker.is_admin()):
+        raise PermissionDenied
+
+    today      = timezone.now().date()
+    date_from  = request.GET.get('date_from')
+    date_to    = request.GET.get('date_to')
+    branch_id  = request.GET.get('branch')
+
+    # Default: current month
+    if not date_from:
+        date_from = today.replace(day=1).isoformat()
+    if not date_to:
+        date_to = today.isoformat()
+
+    try:
+        df = datetime.strptime(date_from, '%Y-%m-%d').date()
+        dt = datetime.strptime(date_to,   '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        df = today.replace(day=1)
+        dt = today
+
+    # Which staff users to include
+    staff_qs = User.objects.filter(user_role='staff', is_active=True).select_related('branch')
+    if branch_id:
+        staff_qs = staff_qs.filter(branch_id=branch_id)
+    elif checker.is_manager():
+        staff_qs = staff_qs.filter(branch=request.user.branch)
+
+    officers = []
+    for officer in staff_qs:
+        # Disbursements in period (loans assigned to this officer's clients)
+        disbursed_loans = Loan.objects.filter(
+            client__assigned_staff=officer,
+            disbursement_date__date__gte=df,
+            disbursement_date__date__lte=dt,
+            status__in=['active', 'overdue', 'completed', 'disbursed'],
+        )
+        disbursed_count  = disbursed_loans.count()
+        disbursed_amount = disbursed_loans.aggregate(
+            t=Sum('principal_amount')
+        )['t'] or Decimal('0.00')
+
+        # Repayments collected in period
+        from core.models import Transaction
+        repayments = Transaction.objects.filter(
+            processed_by=officer,
+            transaction_type='loan_repayment',
+            status='completed',
+            transaction_date__date__gte=df,
+            transaction_date__date__lte=dt,
+        )
+        repayment_count  = repayments.count()
+        repayment_amount = repayments.aggregate(t=Sum('amount'))['t'] or Decimal('0.00')
+
+        # Active portfolio
+        active_loans = Loan.objects.filter(
+            client__assigned_staff=officer,
+            status__in=['active', 'disbursed'],
+        )
+        overdue_loans = Loan.objects.filter(
+            client__assigned_staff=officer,
+            status='overdue',
+        )
+        active_clients = officer.assigned_clients.filter(is_active=True).count()
+
+        officers.append({
+            'officer':          officer,
+            'disbursed_count':  disbursed_count,
+            'disbursed_amount': disbursed_amount,
+            'repayment_count':  repayment_count,
+            'repayment_amount': repayment_amount,
+            'active_loans':     active_loans.count(),
+            'overdue_loans':    overdue_loans.count(),
+            'active_clients':   active_clients,
+        })
+
+    # Sort by disbursement amount descending
+    officers.sort(key=lambda x: x['disbursed_amount'], reverse=True)
+
+    branches = Branch.objects.filter(is_active=True).order_by('name')
+
+    context = {
+        'page_title':      'Loan Officer Performance Report',
+        'officers':        officers,
+        'date_from':       date_from,
+        'date_to':         date_to,
+        'selected_branch': branch_id,
+        'branches':        branches,
+        'today':           today,
+    }
+    return render(request, 'accounting/report_loan_officer_performance.html', context)
+
+
+# =============================================================================
+# SAVINGS MATURITY REPORT
+# =============================================================================
+
+@login_required
+def report_savings_maturity(request):
+    """
+    Savings Maturity Report
+
+    Lists active fixed-deposit savings accounts maturing within a chosen window,
+    grouped by time band: overdue, this month, next month, later.
+
+    Permissions: Manager, Director, Admin
+    """
+    from core.models import SavingsAccount
+    checker = PermissionChecker(request.user)
+    if not (checker.is_manager() or checker.is_director() or checker.is_admin()):
+        raise PermissionDenied
+
+    today      = timezone.now().date()
+    branch_id  = request.GET.get('branch')
+    months_out = int(request.GET.get('months', 3))   # how far ahead to look
+
+    cutoff = today + timedelta(days=months_out * 30)
+
+    qs = (
+        SavingsAccount.objects
+        .filter(
+            status='active',
+            savings_product__product_type='fixed',
+            maturity_date__isnull=False,
+            maturity_date__lte=cutoff,
+        )
+        .select_related('client', 'branch', 'savings_product')
+        .order_by('maturity_date')
+    )
+
+    if branch_id:
+        qs = qs.filter(branch_id=branch_id)
+    elif checker.is_manager():
+        qs = qs.filter(branch=request.user.branch)
+
+    # Annotate with days_remaining and band
+    overdue    = []
+    this_month = []
+    next_month = []
+    later      = []
+
+    this_month_end = today.replace(day=1) + timedelta(days=32)
+    this_month_end = this_month_end.replace(day=1) - timedelta(days=1)
+    next_month_end = (this_month_end + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+
+    accounts = []
+    for acct in qs:
+        days_left = (acct.maturity_date - today).days
+        row = {
+            'account':   acct,
+            'days_left': days_left,
+        }
+        accounts.append(row)
+        if days_left < 0:
+            overdue.append(row)
+        elif acct.maturity_date <= this_month_end:
+            this_month.append(row)
+        elif acct.maturity_date <= next_month_end:
+            next_month.append(row)
+        else:
+            later.append(row)
+
+    total_balance = sum(a['account'].balance for a in accounts)
+
+    branches = Branch.objects.filter(is_active=True).order_by('name')
+
+    context = {
+        'page_title':      'Savings Maturity Report',
+        'overdue':         overdue,
+        'this_month':      this_month,
+        'next_month':      next_month,
+        'later':           later,
+        'total_balance':   total_balance,
+        'total_count':     len(accounts),
+        'selected_branch': branch_id,
+        'months_out':      months_out,
+        'branches':        branches,
+        'today':           today,
+    }
+    return render(request, 'accounting/report_savings_maturity.html', context)
+
+
+# =============================================================================
+# SYSTEM AUDIT LOG
+# =============================================================================
+
+@login_required
+def audit_log(request):
+    """
+    Unified Audit Dashboard
+
+    Tab 1 — Financial Audit: Posted journal entries (who posted, what type, when, amount)
+    Tab 2 — Activity Audit: Model-level changes tracked by django-auditlog
+             (client approvals, loan status changes, user edits, etc.)
+
+    Permissions: Director and Admin only.
+    """
+    from auditlog.models import LogEntry
+
+    checker = PermissionChecker(request.user)
+    if not (checker.is_director() or checker.is_admin()):
+        messages.error(request, 'Only Directors and Administrators can view the audit log.')
+        raise PermissionDenied
+
+    tab = request.GET.get('tab', 'financial')
+
+    # ── Shared filters ──────────────────────────────────────────────────────
+    date_from_str = request.GET.get('date_from', '')
+    date_to_str = request.GET.get('date_to', '')
+    user_filter = request.GET.get('user', '')
+
+    # ── Tab 1: Financial (Journal Entries) ──────────────────────────────────
+    entry_type_filter = request.GET.get('entry_type', '')
+    journal_entries = (
+        JournalEntry.objects.filter(status='posted')
+        .select_related('created_by', 'posted_by', 'branch', 'loan', 'savings_account')
+        .order_by('-posted_at')
+    )
+    if date_from_str:
+        try:
+            journal_entries = journal_entries.filter(posting_date__gte=date_from_str)
+        except Exception:
+            pass
+    if date_to_str:
+        try:
+            journal_entries = journal_entries.filter(posting_date__lte=date_to_str)
+        except Exception:
+            pass
+    if entry_type_filter:
+        journal_entries = journal_entries.filter(entry_type=entry_type_filter)
+    if user_filter:
+        journal_entries = journal_entries.filter(
+            Q(created_by__username__icontains=user_filter) |
+            Q(created_by__first_name__icontains=user_filter) |
+            Q(created_by__last_name__icontains=user_filter)
+        )
+
+    journal_paginator = Paginator(journal_entries, 50)
+    journal_page = journal_paginator.get_page(request.GET.get('page'))
+    entry_type_choices = JournalEntry._meta.get_field('entry_type').choices
+
+    # ── Tab 2: Activity Audit (LogEntry) ────────────────────────────────────
+    model_filter = request.GET.get('model', '')
+    action_filter = request.GET.get('action', '')
+
+    activity_logs = (
+        LogEntry.objects.all()
+        .select_related('actor', 'content_type')
+        .order_by('-timestamp')
+    )
+    if date_from_str:
+        try:
+            activity_logs = activity_logs.filter(timestamp__date__gte=date_from_str)
+        except Exception:
+            pass
+    if date_to_str:
+        try:
+            activity_logs = activity_logs.filter(timestamp__date__lte=date_to_str)
+        except Exception:
+            pass
+    if user_filter:
+        activity_logs = activity_logs.filter(
+            Q(actor__username__icontains=user_filter) |
+            Q(actor__first_name__icontains=user_filter) |
+            Q(actor__last_name__icontains=user_filter)
+        )
+    if model_filter:
+        activity_logs = activity_logs.filter(content_type__model=model_filter.lower())
+    if action_filter:
+        try:
+            activity_logs = activity_logs.filter(action=int(action_filter))
+        except ValueError:
+            pass
+
+    activity_paginator = Paginator(activity_logs, 50)
+    activity_page = activity_paginator.get_page(request.GET.get('page'))
+
+    # Distinct model names for the filter dropdown (only registered models)
+    registered_models = [
+        'loan', 'client', 'savingsaccount', 'loanpenalty',
+        'loanrestructurerequest', 'assignmentrequest', 'collateral',
+        'user', 'branch', 'loanproduct', 'savingsproduct',
+    ]
+    model_labels = {
+        'loan': 'Loan', 'client': 'Client', 'savingsaccount': 'Savings Account',
+        'loanpenalty': 'Loan Penalty', 'loanrestructurerequest': 'Loan Restructure',
+        'assignmentrequest': 'Assignment Request', 'collateral': 'Collateral',
+        'user': 'User/Staff', 'branch': 'Branch',
+        'loanproduct': 'Loan Product', 'savingsproduct': 'Savings Product',
+    }
+    action_labels = {
+        '0': 'Create', '1': 'Update', '2': 'Delete',
+    }
+
+    context = {
+        'page_title': 'Audit Dashboard',
+        'tab': tab,
+        # Financial
+        'journal_page': journal_page,
+        'journal_total': journal_entries.count(),
+        'entry_type_filter': entry_type_filter,
+        'entry_type_choices': entry_type_choices,
+        # Activity
+        'activity_page': activity_page,
+        'activity_total': activity_logs.count(),
+        'model_filter': model_filter,
+        'action_filter': action_filter,
+        'registered_models': registered_models,
+        'model_labels': model_labels,
+        'action_labels': action_labels,
+        # Shared
+        'date_from': date_from_str,
+        'date_to': date_to_str,
+        'user_filter': user_filter,
+    }
+
+    return render(request, 'accounting/audit_log.html', context)
+
+
+# =============================================================================
+# SUBSIDIARY LEDGER — per client
+# =============================================================================
+
+@login_required
+def subsidiary_ledger(request, client_id):
+    """
+    GL-based subsidiary ledger for a specific client.
+
+    Shows all *posted* JournalEntryLine records where ``line.client = client``,
+    ordered chronologically.  Supports date-range and GL-account filters.
+
+    Useful for auditing which journal entries touched a client's accounts,
+    unlike the client_statement (which shows Transaction objects).
+
+    Permissions: Any staff who can view the client.
+    """
+    from core.models import Client
+
+    checker = PermissionChecker(request.user)
+    client = get_object_or_404(
+        Client.objects.select_related('branch', 'assigned_staff'),
+        id=client_id,
+    )
+    if not checker.can_view_client(client):
+        raise PermissionDenied
+
+    today = timezone.now().date()
+
+    date_from_str = request.GET.get('date_from', '')
+    date_to_str   = request.GET.get('date_to', '')
+    account_filter = request.GET.get('account', '')
+
+    # Defaults: last 12 months
+    if date_from_str:
+        try:
+            date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
+        except ValueError:
+            date_from = today.replace(year=today.year - 1)
+    else:
+        date_from = today.replace(year=today.year - 1)
+
+    if date_to_str:
+        try:
+            date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
+        except ValueError:
+            date_to = today
+    else:
+        date_to = today
+
+    lines_qs = (
+        JournalEntryLine.objects
+        .filter(
+            client=client,
+            journal_entry__status='posted',
+            journal_entry__transaction_date__range=[date_from, date_to],
+        )
+        .select_related(
+            'account',
+            'journal_entry',
+            'journal_entry__branch',
+            'journal_entry__created_by',
+        )
+        .order_by('journal_entry__transaction_date', 'id')
+    )
+
+    if account_filter:
+        lines_qs = lines_qs.filter(account__gl_code=account_filter)
+
+    # Per-account summary
+    account_summary = (
+        JournalEntryLine.objects
+        .filter(
+            client=client,
+            journal_entry__status='posted',
+            journal_entry__transaction_date__range=[date_from, date_to],
+        )
+        .values('account__gl_code', 'account__account_name')
+        .annotate(
+            total_debit=Sum('debit_amount'),
+            total_credit=Sum('credit_amount'),
+        )
+        .order_by('account__gl_code')
+    )
+
+    totals = lines_qs.aggregate(
+        total_debit=Sum('debit_amount'),
+        total_credit=Sum('credit_amount'),
+    )
+
+    # GL accounts that have lines for this client (for the filter dropdown)
+    gl_accounts = (
+        JournalEntryLine.objects
+        .filter(
+            client=client,
+            journal_entry__status='posted',
+        )
+        .values('account__gl_code', 'account__account_name')
+        .distinct()
+        .order_by('account__gl_code')
+    )
+
+    paginator = Paginator(lines_qs, 50)
+    page_obj  = paginator.get_page(request.GET.get('page'))
+
+    context = {
+        'page_title':      f'Subsidiary Ledger — {client.get_full_name()}',
+        'client':          client,
+        'page_obj':        page_obj,
+        'account_summary': account_summary,
+        'totals':          totals,
+        'gl_accounts':     gl_accounts,
+        'date_from':       date_from,
+        'date_to':         date_to,
+        'account_filter':  account_filter,
+    }
+    return render(request, 'accounting/subsidiary_ledger.html', context)

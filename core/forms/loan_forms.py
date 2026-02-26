@@ -41,10 +41,10 @@ class LoanApplicationForm(forms.ModelForm):
         widgets = {
             'client': forms.Select(attrs={'class': SELECT_CLASS}),
             'loan_product': forms.Select(attrs={'class': SELECT_CLASS}),
-            'principal_amount': forms.NumberInput(attrs={
+            'principal_amount': forms.TextInput(attrs={
                 'class': TEXT_INPUT_CLASS,
                 'placeholder': '₦ 10,000.00',
-                'step': '0.01',
+                'inputmode': 'decimal',
                 'id': 'id_principal_amount'
             }),
             'duration_months': forms.NumberInput(attrs={
@@ -112,15 +112,29 @@ class LoanApplicationForm(forms.ModelForm):
         self.fields['linked_account'].required = False
         self.fields['linked_account'].queryset = SavingsAccount.objects.none()
 
-        # Client signature is optional
-        self.fields['client_signature'].required = False
+        # Client signature is required
+        self.fields['client_signature'].required = True
 
-        # If client is selected, filter linked accounts
+        # If client is known (edit mode via instance, or POST submission), filter linked accounts
+        client_id = None
         if self.instance and self.instance.client_id:
+            client_id = self.instance.client_id
+        elif self.data.get('client'):
+            client_id = self.data.get('client')
+
+        if client_id:
             self.fields['linked_account'].queryset = SavingsAccount.objects.filter(
-                client=self.instance.client,
+                client_id=client_id,
                 status='active'
             )
+
+    def clean_principal_amount(self):
+        value = self.data.get('principal_amount', '')
+        value = value.replace(',', '').strip()
+        try:
+            return Decimal(value)
+        except Exception:
+            raise forms.ValidationError('Enter a valid amount (e.g. 90,000 or 90000).')
 
     def clean(self):
         cleaned_data = super().clean()
@@ -198,10 +212,11 @@ class LoanApplicationForm(forms.ModelForm):
 
         # Calculate number of installments
         freq_map = {
-            'daily': months * 30,
-            'weekly': months * 4,
+            'daily':       months * 20,   # 20 standard working days per month
+            'weekly':      months * 4,
             'fortnightly': months * 2,
-            'monthly': months,
+            'monthly':     months,
+            'yearly':      max(1, months // 12),
         }
 
         num_installments = freq_map.get(loan_product.repayment_frequency, months)
@@ -715,7 +730,9 @@ class GuarantorForm(forms.ModelForm):
             'guarantor_type', 'linked_client', 'guarantee_amount',
             'name', 'phone', 'email', 'relationship', 'address',
             'occupation', 'employer', 'monthly_income',
-            'id_type', 'id_number', 'notes'
+            'id_type', 'id_number',
+            'id_card_front', 'id_card_back', 'signature',
+            'notes'
         ]
         widgets = {
             'guarantor_type': forms.Select(attrs={
@@ -794,6 +811,8 @@ class GuarantorForm(forms.ModelForm):
         self.fields['monthly_income'].required = False
         self.fields['id_type'].required = False
         self.fields['id_number'].required = False
+        self.fields['id_card_front'].required = False
+        self.fields['id_card_back'].required = False
         self.fields['notes'].required = False
 
         # Filter clients for internal guarantor selection
@@ -807,9 +826,10 @@ class GuarantorForm(forms.ModelForm):
 
         # Set default guarantee amount to loan principal divided by required guarantors
         if self.loan and not self.instance.pk:
-            required = self.loan.loan_product.required_guarantors or 1
-            default_amount = self.loan.principal_amount / required
-            self.fields['guarantee_amount'].initial = default_amount
+            required = Decimal(str(self.loan.loan_product.required_guarantors or 1))
+            default_amount = (self.loan.principal_amount / required).quantize(Decimal('0.01'))
+            self.initial['guarantee_amount'] = default_amount
+            self.fields['guarantee_amount'].widget.attrs['value'] = str(default_amount)
 
     def clean(self):
         cleaned_data = super().clean()

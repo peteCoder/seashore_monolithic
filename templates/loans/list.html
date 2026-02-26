@@ -6,7 +6,7 @@
 {% block content %}
 <div x-data="{ showFilters: false }">
     <!-- Header with Create Button -->
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
         <div>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Loans</h1>
             <p class="text-gray-600 dark:text-gray-400">{{ summary.total_count }} total loans</p>
@@ -14,7 +14,7 @@
 
         {% if checker.can_create_loan %}
         <a href="{% url 'core:loan_create' %}"
-           class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold transition-colors flex items-center space-x-2">
+           class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center space-x-2 self-start sm:self-auto">
             <i class="fas fa-plus"></i>
             <span>Create New Loan</span>
         </a>
@@ -27,7 +27,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">Total Loans</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ summary.total_count }}</p>
+                    <p class="text-xl font-bold text-gray-900 dark:text-white">{{ summary.total_count }}</p>
                 </div>
                 <div class="h-12 w-12 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
                     <i class="fas fa-file-invoice-dollar text-blue-600 dark:text-blue-400"></i>
@@ -39,7 +39,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">Total Disbursed</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">₦{{ summary.total_disbursed|floatformat:0|intcomma }}</p>
+                    <p class="text-xl font-bold text-gray-900 dark:text-white">₦{{ summary.total_disbursed|floatformat:0|intcomma }}</p>
                 </div>
                 <div class="h-12 w-12 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
                     <i class="fas fa-money-bill-wave text-green-600 dark:text-green-400"></i>
@@ -51,7 +51,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">Total Outstanding</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">₦{{ summary.total_outstanding|floatformat:0|intcomma }}</p>
+                    <p class="text-xl font-bold text-gray-900 dark:text-white">₦{{ summary.total_outstanding|floatformat:0|intcomma }}</p>
                 </div>
                 <div class="h-12 w-12 rounded-full bg-yellow-100 dark:bg-yellow-900 flex items-center justify-center">
                     <i class="fas fa-hourglass-half text-yellow-600 dark:text-yellow-400"></i>
@@ -63,7 +63,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">Active Loans</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ summary.active_count }}</p>
+                    <p class="text-xl font-bold text-gray-900 dark:text-white">{{ summary.active_count }}</p>
                 </div>
                 <div class="h-12 w-12 rounded-full bg-purple-100 dark:bg-purple-900 flex items-center justify-center">
                     <i class="fas fa-check-circle text-purple-600 dark:text-purple-400"></i>
@@ -109,19 +109,19 @@
                 </div>
             </div>
 
-            <div class="flex items-center justify-between">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <button type="button" @click="showFilters = !showFilters"
-                        class="text-primary-600 dark:text-primary-400 text-sm font-medium">
+                        class="text-primary-600 dark:text-primary-400 text-sm font-medium self-start">
                     <span x-text="showFilters ? 'Hide Filters' : 'Show More Filters'"></span>
                 </button>
 
-                <div class="space-x-2">
+                <div class="flex gap-2">
                     <a href="{% url 'core:loan_list' %}"
-                       class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
+                       class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">
                         Clear
                     </a>
                     <button type="submit"
-                            class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg">
+                            class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm">
                         Apply Filters
                     </button>
                 </div>

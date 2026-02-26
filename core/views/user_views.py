@@ -13,7 +13,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q, Count, Sum
 from django.utils import timezone
 
-from core.models import User, Client
+from core.models import User, Client, Branch
 from core.forms.user_forms import (
     UserCreateForm,
     UserUpdateForm,
@@ -22,6 +22,43 @@ from core.forms.user_forms import (
     UserSearchForm,
 )
 from core.permissions import PermissionChecker
+
+
+def _sync_branch_manager(user, old_branch=None, old_role=None):
+    """
+    Keep Branch.manager in sync with User.user_role and User.branch.
+
+    Rules:
+    - If the user IS a manager and HAS a branch → set that branch's manager to them.
+    - If the user WAS a manager on a (now different) branch, or is no longer a
+      manager, and they were still recorded as that branch's manager → clear it.
+
+    Returns:
+        User | None — the previous manager who was displaced (if any), so the
+        caller can show a warning. The displaced manager's role is NOT changed
+        automatically; the admin should review their assignment.
+    """
+    new_role   = user.user_role
+    new_branch = user.branch
+
+    # Clear manager from the old branch if role/branch changed
+    if old_branch and old_role == 'manager':
+        if new_branch != old_branch or new_role != 'manager':
+            # Only clear if this user is still recorded as the old branch's manager
+            if old_branch.manager_id == user.pk:
+                old_branch.manager = None
+                old_branch.save(update_fields=['manager'])
+
+    # Set manager on the new branch — detect if a different manager is displaced
+    displaced = None
+    if new_role == 'manager' and new_branch:
+        existing = new_branch.manager
+        if existing and existing.pk != user.pk:
+            displaced = existing          # someone else was manager here
+        new_branch.manager = user
+        new_branch.save(update_fields=['manager'])
+
+    return displaced
 
 
 # =============================================================================
@@ -109,6 +146,14 @@ def user_create(request):
         form = UserCreateForm(request.POST)
         if form.is_valid():
             user = form.save()
+            displaced = _sync_branch_manager(user)
+            if displaced:
+                messages.warning(
+                    request,
+                    f'{displaced.get_full_name()} was previously the manager of '
+                    f'{user.branch.name}. Their role is still set to "Manager" — '
+                    f'please review their branch assignment.'
+                )
             messages.success(
                 request,
                 f'Staff account for {user.get_full_name()} created successfully!'
@@ -213,10 +258,22 @@ def user_edit(request, user_id):
     user = get_object_or_404(User, id=user_id)
 
     if request.method == 'POST':
-        form = UserUpdateForm(request.POST, instance=user)
+        # Capture current role and branch before any changes
+        old_role   = user.user_role
+        old_branch = user.branch
+
+        form = UserUpdateForm(request.POST, request.FILES, instance=user)
 
         if form.is_valid():
             form.save()
+            displaced = _sync_branch_manager(user, old_branch=old_branch, old_role=old_role)
+            if displaced:
+                messages.warning(
+                    request,
+                    f'{displaced.get_full_name()} was previously the manager of '
+                    f'{user.branch.name}. Their role is still set to "Manager" — '
+                    f'please review their branch assignment.'
+                )
             messages.success(request, f'User {user.get_full_name()} updated successfully!')
             return redirect('core:user_detail', user_id=user.id)
     else:

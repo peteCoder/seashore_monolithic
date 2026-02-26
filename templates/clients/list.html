@@ -5,7 +5,7 @@
 {% block content %}
 <div x-data="{ showFilters: false }">
     <!-- Header with Create Button -->
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
         <div>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Clients</h1>
             <p class="text-gray-600 dark:text-gray-400">{{ total_count }} total clients</p>
@@ -13,7 +13,7 @@
 
         {% if checker.can_create_client %}
         <a href="{% url 'core:client_create' %}"
-           class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold transition-colors flex items-center space-x-2">
+           class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center space-x-2 self-start sm:self-auto">
             <i class="fas fa-plus"></i>
             <span>Register New Client</span>
         </a>
@@ -45,26 +45,19 @@
                 </div>
             </div>
 
-            <!-- Advanced Filters Toggle -->
-            <div x-show="showFilters" x-cloak class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div>
-                    {{ search_form.level }}
-                </div>
-            </div>
-
-            <div class="flex items-center justify-between">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <button type="button" @click="showFilters = !showFilters"
-                        class="text-primary-600 dark:text-primary-400 text-sm font-medium">
+                        class="text-primary-600 dark:text-primary-400 text-sm font-medium self-start">
                     <span x-text="showFilters ? 'Hide Filters' : 'Show More Filters'"></span>
                 </button>
 
-                <div class="space-x-2">
+                <div class="flex gap-2">
                     <a href="{% url 'core:client_list' %}"
-                       class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
+                       class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">
                         Clear
                     </a>
                     <button type="submit"
-                            class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg">
+                            class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm">
                         Apply Filters
                     </button>
                 </div>
@@ -85,9 +78,6 @@
                     </th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Branch
-                    </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Level
                     </th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Status
@@ -127,16 +117,6 @@
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                         {{ client.branch.name }}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap">
-                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
-                                     {% if client.level == 'bronze' %}bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300
-                                     {% elif client.level == 'silver' %}bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300
-                                     {% elif client.level == 'gold' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300
-                                     {% elif client.level == 'platinum' %}bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300
-                                     {% else %}bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300{% endif %}">
-                            {{ client.get_level_display }}
-                        </span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
                         <div class="flex flex-col space-y-1">

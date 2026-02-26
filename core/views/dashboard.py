@@ -13,6 +13,7 @@ Role-based dashboard with statistics and quick actions
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum, Count, Q, Avg
+from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
@@ -59,13 +60,6 @@ def dashboard_view(request):
         'active': clients.filter(is_active=True).count(),
         'pending_approval': clients.filter(approval_status='pending').count(),
         'new_this_month': clients.filter(created_at__gte=this_month_start).count(),
-        'by_level': {
-            'bronze': clients.filter(level='bronze').count(),
-            'silver': clients.filter(level='silver').count(),
-            'gold': clients.filter(level='gold').count(),
-            'platinum': clients.filter(level='platinum').count(),
-            'diamond': clients.filter(level='diamond').count(),
-        }
     }
     
     # =========================================================================
@@ -223,37 +217,37 @@ def dashboard_view(request):
             'type': 'warning',
             'icon': '⚠️',
             'message': f"{loan_stats['overdue']} overdue loan(s) requiring attention",
-            'action_url': '/loans/?status=overdue',
+            'action_url': reverse('core:loan_list') + '?status=overdue',
             'action_text': 'View Overdue Loans'
         })
-    
+
     # Pending approvals alert
     if pending_items.get('clients', 0) > 0:
         alerts.append({
             'type': 'info',
             'icon': '👥',
             'message': f"{pending_items['clients']} client(s) pending approval",
-            'action_url': '/clients/?approval_status=pending',
+            'action_url': reverse('core:client_list') + '?approval_status=pending',
             'action_text': 'Review Clients'
         })
-    
+
     if pending_items.get('loans', 0) > 0:
         alerts.append({
             'type': 'info',
             'icon': '💰',
             'message': f"{pending_items['loans']} loan(s) pending approval",
-            'action_url': '/loans/?status=pending_approval',
+            'action_url': reverse('core:loan_list') + '?status=pending_approval',
             'action_text': 'Review Loans'
         })
-    
+
     # Low portfolio performance alert
     if loan_stats['portfolio_at_risk_pct'] > 10:
         alerts.append({
             'type': 'error',
             'icon': '📉',
             'message': f"Portfolio at risk: {loan_stats['portfolio_at_risk_pct']:.1f}%",
-            'action_url': '/reports/portfolio/',
-            'action_text': 'View Report'
+            'action_url': reverse('core:report_par_aging'),
+            'action_text': 'View PAR Report'
         })
     
     # =========================================================================
@@ -291,7 +285,7 @@ def dashboard_view(request):
                 'change': f"+{client_stats['new_this_month']} this month",
                 'icon': '👥',
                 'color': 'blue',
-                'url': '/clients/'
+                'url': reverse('core:client_list'),
             },
             {
                 'title': 'Active Loans',
@@ -299,7 +293,7 @@ def dashboard_view(request):
                 'change': f"₦{loan_stats['total_outstanding']:,.0f} outstanding",
                 'icon': '💰',
                 'color': 'green',
-                'url': '/loans/'
+                'url': reverse('core:loan_list'),
             },
             {
                 'title': 'Savings Balance',
@@ -307,15 +301,15 @@ def dashboard_view(request):
                 'change': f"{savings_stats['active_accounts']} accounts",
                 'icon': '🏦',
                 'color': 'purple',
-                'url': '/savings/'
+                'url': reverse('core:savings_account_list'),
             },
             {
-                'title': 'Today\'s Transactions',
+                'title': "Today's Transactions",
                 'value': transaction_stats['today_count'],
                 'change': f"₦{transaction_stats['today_deposits']:,.0f} deposits",
                 'icon': '📊',
                 'color': 'yellow',
-                'url': '/transactions/'
+                'url': reverse('core:savings_transaction_list'),
             },
         ]
     }

@@ -42,7 +42,7 @@
         <div class="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
                 <p class="text-sm text-gray-600 dark:text-gray-400">Current Balance</p>
-                <p class="text-lg font-bold text-green-600 dark:text-green-400">₦{{ account.current_balance|floatformat:2|intcomma }}</p>
+                <p class="text-lg font-bold text-green-600 dark:text-green-400">₦{{ account.balance|floatformat:2|intcomma }}</p>
             </div>
             <div>
                 <p class="text-sm text-gray-600 dark:text-gray-400">Available Balance</p>
@@ -59,16 +59,16 @@
 
             {% if account %}
             <!-- Hidden account field when posting from specific account -->
-            <input type="hidden" name="account" value="{{ account.id }}">
+            <input type="hidden" name="savings_account" value="{{ account.id }}">
             {% else %}
             <!-- Account Selection -->
             <div class="mb-6">
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {{ form.account.label }} <span class="text-red-500">*</span>
+                    {{ form.savings_account.label }} <span class="text-red-500">*</span>
                 </label>
-                {{ form.account }}
-                {% if form.account.errors %}
-                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.account.errors.0 }}</p>
+                {{ form.savings_account }}
+                {% if form.savings_account.errors %}
+                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.savings_account.errors.0 }}</p>
                 {% endif %}
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Select the account for this deposit</p>
             </div>
@@ -85,7 +85,7 @@
                 {% endif %}
                 {% if account %}
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    Current balance: ₦{{ account.current_balance|floatformat:2|intcomma }}
+                    Current balance: ₦{{ account.balance|floatformat:2|intcomma }}
                 </p>
                 {% endif %}
             </div>
@@ -116,22 +116,22 @@
             <!-- Transaction Date -->
             <div class="mb-6">
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {{ form.transaction_date.label }} <span class="text-red-500">*</span>
+                    {{ form.payment_date.label }} <span class="text-red-500">*</span>
                 </label>
-                {{ form.transaction_date }}
-                {% if form.transaction_date.errors %}
-                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.transaction_date.errors.0 }}</p>
+                {{ form.payment_date }}
+                {% if form.payment_date.errors %}
+                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.payment_date.errors.0 }}</p>
                 {% endif %}
             </div>
 
             <!-- Notes -->
             <div class="mb-6">
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {{ form.notes.label }}
+                    {{ form.submission_notes.label }}
                 </label>
-                {{ form.notes }}
-                {% if form.notes.errors %}
-                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.notes.errors.0 }}</p>
+                {{ form.submission_notes }}
+                {% if form.submission_notes.errors %}
+                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.submission_notes.errors.0 }}</p>
                 {% endif %}
             </div>
 

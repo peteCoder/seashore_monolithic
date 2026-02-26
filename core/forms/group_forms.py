@@ -8,7 +8,7 @@ Forms for managing client groups and group memberships
 from django import forms
 from django.core.exceptions import ValidationError
 from django.db.models import Q
-from core.models import ClientGroup, Client, Branch, User
+from core.models import ClientGroup, Client, Branch, User, GroupMembershipRequest
 
 # CSS Classes for form widgets
 TEXT_INPUT_CLASS = 'w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:border-primary-500 dark:focus:border-primary-500 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-900/30 transition-all'
@@ -66,35 +66,52 @@ class ClientGroupForm(forms.ModelForm):
         user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
 
-        # Filter loan officers based on user permissions
+        # Will be set to the User instance when the field must be locked to one person
+        self.locked_loan_officer = None
+
         if user:
             from core.permissions import PermissionChecker
             checker = PermissionChecker(user)
 
-            # Filter branches based on user permissions
+            # ── Branch dropdown ───────────────────────────────────────────
             if checker.is_staff():
-                # Staff can only see their branch
                 self.fields['branch'].queryset = Branch.objects.filter(id=user.branch_id)
                 self.fields['branch'].initial = user.branch_id
             elif checker.is_manager():
-                # Managers can see their branch
                 self.fields['branch'].queryset = Branch.objects.filter(id=user.branch_id)
             else:
-                # Admin/Director can see all branches
                 self.fields['branch'].queryset = Branch.objects.filter(is_active=True)
 
-            # Filter loan officers to only show staff from the selected branch
-            if self.instance and self.instance.branch_id:
-                self.fields['loan_officer'].queryset = User.objects.filter(
-                    branch_id=self.instance.branch_id,
-                    user_role__in=['staff', 'manager', 'director'],
-                    is_active=True
+            # ── Loan officer dropdown ─────────────────────────────────────
+            if checker.is_staff():
+                # Loan officers see only themselves — locked, cannot be changed
+                self.fields['loan_officer'].queryset = User.objects.filter(pk=user.pk)
+                self.fields['loan_officer'].initial = user.pk
+                self.fields['loan_officer'].required = True
+                self.locked_loan_officer = user  # signals template to render read-only
+
+            elif checker.is_manager():
+                # Managers see all active loan officers (staff) in their own branch
+                self.fields['loan_officer'].queryset = (
+                    User.objects
+                    .filter(branch_id=user.branch_id, user_role='staff', is_active=True)
+                    .order_by('first_name', 'last_name')
                 )
+
             else:
-                self.fields['loan_officer'].queryset = User.objects.filter(
-                    user_role__in=['staff', 'manager', 'director'],
-                    is_active=True
+                # Admin / Director see all active loan officers across every branch
+                self.fields['loan_officer'].queryset = (
+                    User.objects
+                    .filter(user_role='staff', is_active=True)
+                    .select_related('branch')
+                    .order_by('branch__name', 'first_name', 'last_name')
                 )
+
+    def clean_loan_officer(self):
+        """When the field is locked (staff user), always return the locked user."""
+        if self.locked_loan_officer is not None:
+            return self.locked_loan_officer
+        return self.cleaned_data.get('loan_officer')
 
     def clean_name(self):
         """Validate name uniqueness"""
@@ -260,14 +277,23 @@ class BulkAddMembersForm(forms.Form):
     def __init__(self, *args, **kwargs):
         group = kwargs.pop('group', None)
         super().__init__(*args, **kwargs)
+        self.group = group
 
         if group:
-            # Only show active, approved clients from the same branch who don't belong to any group
+            # Clients who already have a pending request for any group are
+            # not yet active members (Client.group is still NULL) but should
+            # not be selectable again until the request is resolved.
+            pending_client_ids = GroupMembershipRequest.objects.filter(
+                status='pending'
+            ).values_list('client_id', flat=True)
+
             self.fields['clients'].queryset = Client.objects.filter(
                 branch=group.branch,
                 is_active=True,
                 approval_status='approved',
-                group__isnull=True  # Only clients not in any group
+                group__isnull=True,          # not an active member of any group
+            ).exclude(
+                id__in=pending_client_ids,   # no outstanding pending request
             ).order_by('first_name', 'last_name')
 
     def clean_clients(self):
@@ -277,11 +303,30 @@ class BulkAddMembersForm(forms.Form):
         if not clients:
             raise ValidationError("Please select at least one client.")
 
-        # Check if any client already belongs to a group
+        client_ids = [c.id for c in clients]
+
+        # Guard: client already has an active group membership
         clients_with_groups = [c for c in clients if c.group]
         if clients_with_groups:
             names = ', '.join([c.full_name for c in clients_with_groups])
-            raise ValidationError(f"The following clients already belong to groups: {names}")
+            raise ValidationError(
+                f"The following clients already belong to a group: {names}"
+            )
+
+        # Guard: client already has a pending membership request for any group
+        pending = (
+            GroupMembershipRequest.objects
+            .filter(client_id__in=client_ids, status='pending')
+            .select_related('client', 'group')
+        )
+        if pending.exists():
+            names = ', '.join(
+                f"{p.client.full_name} (pending for {p.group.name})"
+                for p in pending
+            )
+            raise ValidationError(
+                f"The following clients already have a pending membership request: {names}"
+            )
 
         return clients
 

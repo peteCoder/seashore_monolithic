@@ -15,13 +15,15 @@ from django.db.models import Q, Sum, F, Case, When, DecimalField
 from django.utils import timezone
 from decimal import Decimal
 
-from core.models import Loan, LoanRepaymentPosting, Transaction, Client, Branch, LoanProduct, Guarantor
+from core.models import Loan, LoanRepaymentPosting, Transaction, Client, Branch, LoanProduct, Guarantor, Collateral, FollowUpTask, PaymentPromise, LoanInsuranceClaim
+from core.utils.accounting_helpers import create_journal_entry
 from core.forms.loan_forms import (
     LoanApplicationForm, LoanFeePaymentForm, LoanApprovalForm,
     LoanDisbursementForm, LoanRepaymentPostingForm, BulkLoanRepaymentPostingForm,
     ApproveRepaymentPostingForm, LoanSearchForm, GuarantorForm
 )
 from core.permissions import PermissionChecker
+from core.services.notification_service import notify, notify_role
 
 
 # =============================================================================
@@ -103,7 +105,7 @@ def loan_list(request):
     summary = {
         'total_count': loans.count(),
         'pending_approval': loans.filter(status='pending_approval').count(),
-        'active': loans.filter(status='active').count(),
+        'active_count': loans.filter(status='active').count(),
         'overdue': loans.filter(status='overdue').count(),
         'total_disbursed': loans.filter(
             status__in=['active', 'overdue', 'completed']
@@ -190,6 +192,24 @@ def loan_detail(request, loan_id):
     current_guarantor_count = guarantors.count()
     guarantors_complete = current_guarantor_count >= required_guarantors
 
+    # Collections: follow-up tasks and payment promises for this loan
+    followup_tasks = FollowUpTask.objects.filter(loan=loan).select_related(
+        'assigned_to', 'created_by'
+    ).order_by('due_date')
+
+    payment_promises = PaymentPromise.objects.filter(loan=loan).select_related(
+        'recorded_by'
+    ).order_by('promise_date')
+
+    # Insurance claims for this loan
+    insurance_claims = LoanInsuranceClaim.objects.filter(loan=loan).select_related(
+        'filed_by', 'reviewed_by', 'paid_by'
+    ).order_by('-created_at')
+
+    active_insurance_claim = insurance_claims.filter(
+        status__in=['submitted', 'under_review', 'approved']
+    ).first()
+
     context = {
         'page_title': f'Loan {loan.loan_number}',
         'loan': loan,
@@ -202,6 +222,11 @@ def loan_detail(request, loan_id):
         'required_guarantors': required_guarantors,
         'current_guarantor_count': current_guarantor_count,
         'guarantors_complete': guarantors_complete,
+        'followup_tasks': followup_tasks,
+        'payment_promises': payment_promises,
+        'insurance_claims': insurance_claims,
+        'active_insurance_claim': active_insurance_claim,
+        'today': timezone.now().date(),
     }
 
     return render(request, 'loans/detail.html', context)
@@ -239,6 +264,18 @@ def loan_create(request):
                 loan.branch = request.user.branch
 
             loan.save()
+
+            # Notify branch manager of new loan application
+            notify_role(
+                roles='manager',
+                branch=loan.branch,
+                notification_type='loan_applied',
+                title='New Loan Application',
+                message=f'A new loan application {loan.loan_number} of ₦{loan.principal_amount:,.2f} has been submitted for client {loan.client.get_full_name()}.',
+                related_loan=loan,
+                related_client=loan.client,
+                exclude_user=request.user,
+            )
 
             # Check if guarantors are required
             required_guarantors = loan.loan_product.required_guarantors
@@ -438,6 +475,32 @@ def loan_approve(request, loan_id):
         )
         return redirect('core:loan_guarantors', loan_id=loan.id)
 
+    # Check collateral requirements
+    if loan.loan_product.requires_collateral:
+        collaterals = loan.collaterals.filter(status__in=['verified', 'pending'])
+        if not collaterals.exists():
+            messages.error(
+                request,
+                "Cannot approve loan. This loan product requires collateral. "
+                "Please add at least one collateral item before approval."
+            )
+            return redirect('core:loan_collaterals', loan_id=loan.id)
+
+        min_ratio = loan.loan_product.min_collateral_value_ratio
+        if min_ratio and min_ratio > Decimal('0.00'):
+            total_value = collaterals.aggregate(
+                total=Sum('value')
+            )['total'] or Decimal('0.00')
+            required_value = loan.principal_amount * min_ratio
+            if total_value < required_value:
+                messages.error(
+                    request,
+                    f"Collateral value (₦{total_value:,.2f}) is below the required minimum of "
+                    f"₦{required_value:,.2f} ({min_ratio * 100:.0f}% of ₦{loan.principal_amount:,.2f} principal). "
+                    f"Please add more collateral."
+                )
+                return redirect('core:loan_collaterals', loan_id=loan.id)
+
     if request.method == 'POST':
         form = LoanApprovalForm(request.POST, loan=loan)
 
@@ -449,6 +512,24 @@ def loan_approve(request, loan_id):
                 success, message = loan.approve(approved_by=request.user)
                 if success:
                     messages.success(request, f"Loan approved successfully. {message}")
+                    notify(
+                        user=loan.created_by,
+                        notification_type='loan_approved',
+                        title='Loan Approved',
+                        message=f'Loan {loan.loan_number} for {loan.client.get_full_name()} has been approved.',
+                        related_loan=loan,
+                        related_client=loan.client,
+                    )
+                    notify_role(
+                        roles='manager',
+                        branch=loan.branch,
+                        notification_type='loan_approved',
+                        title='Loan Approved',
+                        message=f'Loan {loan.loan_number} of ₦{loan.principal_amount:,.2f} for {loan.client.get_full_name()} has been approved by {request.user.get_full_name()}.',
+                        related_loan=loan,
+                        related_client=loan.client,
+                        exclude_user=request.user,
+                    )
                     return redirect('core:loan_detail', loan_id=loan.id)
                 else:
                     messages.error(request, f"Failed to approve loan: {message}")
@@ -456,6 +537,26 @@ def loan_approve(request, loan_id):
                 success, message = loan.reject(rejected_by=request.user, reason=notes)
                 if success:
                     messages.success(request, f"Loan rejected. {message}")
+                    notify(
+                        user=loan.created_by,
+                        notification_type='loan_rejected',
+                        title='Loan Rejected',
+                        message=f'Loan {loan.loan_number} for {loan.client.get_full_name()} has been rejected. Reason: {notes or "No reason given"}',
+                        related_loan=loan,
+                        related_client=loan.client,
+                        is_urgent=True,
+                    )
+                    notify_role(
+                        roles='manager',
+                        branch=loan.branch,
+                        notification_type='loan_rejected',
+                        title='Loan Rejected',
+                        message=f'Loan {loan.loan_number} for {loan.client.get_full_name()} was rejected by {request.user.get_full_name()}. Reason: {notes or "No reason given"}',
+                        related_loan=loan,
+                        related_client=loan.client,
+                        is_urgent=True,
+                        exclude_user=request.user,
+                    )
                     return redirect('core:loan_detail', loan_id=loan.id)
                 else:
                     messages.error(request, f"Failed to reject loan: {message}")
@@ -525,6 +626,33 @@ def loan_disburse(request, loan_id):
 
             if success:
                 messages.success(request, f"Loan disbursed successfully. {message}")
+                notify(
+                    user=loan.created_by,
+                    notification_type='loan_disbursed',
+                    title='Loan Disbursed',
+                    message=f'Loan {loan.loan_number} (₦{loan.amount_disbursed:,.2f}) for {loan.client.get_full_name()} has been disbursed.',
+                    related_loan=loan,
+                    related_client=loan.client,
+                )
+                if loan.client.assigned_staff and loan.client.assigned_staff != loan.created_by:
+                    notify(
+                        user=loan.client.assigned_staff,
+                        notification_type='loan_disbursed',
+                        title='Loan Disbursed',
+                        message=f'Loan {loan.loan_number} (₦{loan.amount_disbursed:,.2f}) for your client {loan.client.get_full_name()} has been disbursed.',
+                        related_loan=loan,
+                        related_client=loan.client,
+                    )
+                notify_role(
+                    roles='manager',
+                    branch=loan.branch,
+                    notification_type='loan_disbursed',
+                    title='Loan Disbursed',
+                    message=f'Loan {loan.loan_number} of ₦{loan.amount_disbursed:,.2f} for {loan.client.get_full_name()} has been disbursed by {request.user.get_full_name()}.',
+                    related_loan=loan,
+                    related_client=loan.client,
+                    exclude_user=request.user,
+                )
                 return redirect('core:loan_detail', loan_id=loan.id)
             else:
                 messages.error(request, f"Failed to disburse loan: {message}")
@@ -586,6 +714,28 @@ def loan_repayment_post(request, loan_id=None):
                 posting.loan = loan
 
             posting.save()
+
+            # Notify managers in both the staff's branch and the client's branch
+            branches_to_notify = set()
+            if request.user.branch:
+                branches_to_notify.add(request.user.branch)
+            if posting.loan.client.branch:
+                branches_to_notify.add(posting.loan.client.branch)
+            for branch in branches_to_notify:
+                notify_role(
+                    roles='manager',
+                    branch=branch,
+                    notification_type='repayment_posted',
+                    title='Repayment Posted — Awaiting Approval',
+                    message=(
+                        f'{request.user.get_full_name()} posted a repayment of '
+                        f'{posting.amount} for loan {posting.loan.loan_number} '
+                        f'(client: {posting.loan.client.get_full_name()}). '
+                        f'Awaiting your approval.'
+                    ),
+                    related_loan=posting.loan,
+                    related_client=posting.loan.client,
+                )
 
             messages.success(
                 request,
@@ -691,6 +841,25 @@ def loan_repayment_post_bulk(request):
                         errors.append(f"Error processing loan {loan_id}: {str(e)}")
 
         if created_postings:
+            # Notify managers in the staff's branch and all clients' branches
+            branches_to_notify = set()
+            if request.user.branch:
+                branches_to_notify.add(request.user.branch)
+            for p in created_postings:
+                if p.loan.client.branch:
+                    branches_to_notify.add(p.loan.client.branch)
+            for branch in branches_to_notify:
+                notify_role(
+                    roles='manager',
+                    branch=branch,
+                    notification_type='repayment_posted',
+                    title='Repayments Posted — Awaiting Approval',
+                    message=(
+                        f'{request.user.get_full_name()} posted {len(created_postings)} '
+                        f'repayment(s). Awaiting your approval.'
+                    ),
+                )
+
             messages.success(
                 request,
                 f'Successfully posted {len(created_postings)} repayment(s). '
@@ -850,11 +1019,61 @@ def loan_repayment_approve(request, posting_id):
                         f'Repayment posting {posting.posting_ref} approved successfully. '
                         f'Loan balance updated.'
                     )
+                    # Notify the submitter
+                    posting.loan.refresh_from_db(fields=['status'])
+                    if posting.loan.status == 'completed':
+                        notify(
+                            user=posting.submitted_by,
+                            notification_type='loan_completed',
+                            title='Loan Fully Repaid',
+                            message=f'Loan {posting.loan.loan_number} for {posting.loan.client.get_full_name()} is now fully repaid.',
+                            related_loan=posting.loan,
+                            related_client=posting.loan.client,
+                        )
+                    else:
+                        notify(
+                            user=posting.submitted_by,
+                            notification_type='transaction_approved',
+                            title='Repayment Approved',
+                            message=f'Repayment posting {posting.posting_ref} of ₦{posting.amount:,.2f} for loan {posting.loan.loan_number} has been approved.',
+                            related_loan=posting.loan,
+                            related_client=posting.loan.client,
+                        )
+                    notify_role(
+                        roles='manager',
+                        branch=posting.loan.branch,
+                        notification_type='transaction_approved',
+                        title='Repayment Approved',
+                        message=f'Repayment posting {posting.posting_ref} of ₦{posting.amount:,.2f} for loan {posting.loan.loan_number} ({posting.loan.client.get_full_name()}) approved by {request.user.get_full_name()}.',
+                        related_loan=posting.loan,
+                        related_client=posting.loan.client,
+                        exclude_user=request.user,
+                    )
                 else:
                     posting.reject(rejected_by=request.user, reason=notes)
                     messages.success(
                         request,
                         f'Repayment posting {posting.posting_ref} rejected.'
+                    )
+                    notify(
+                        user=posting.submitted_by,
+                        notification_type='transaction_rejected',
+                        title='Repayment Rejected',
+                        message=f'Repayment posting {posting.posting_ref} for loan {posting.loan.loan_number} was rejected. Reason: {notes or "No reason given"}',
+                        related_loan=posting.loan,
+                        related_client=posting.loan.client,
+                        is_urgent=True,
+                    )
+                    notify_role(
+                        roles='manager',
+                        branch=posting.loan.branch,
+                        notification_type='transaction_rejected',
+                        title='Repayment Rejected',
+                        message=f'Repayment posting {posting.posting_ref} for loan {posting.loan.loan_number} ({posting.loan.client.get_full_name()}) was rejected by {request.user.get_full_name()}. Reason: {notes or "No reason given"}',
+                        related_loan=posting.loan,
+                        related_client=posting.loan.client,
+                        is_urgent=True,
+                        exclude_user=request.user,
                     )
 
                 return redirect('core:loan_repayment_list')
@@ -981,6 +1200,8 @@ def loan_product_api(request, product_id):
         'code': product.code,
         'loan_type': product.loan_type,
         'loan_type_display': product.get_loan_type_display(),
+        'repayment_frequency':         product.repayment_frequency,
+        'repayment_frequency_display': product.get_repayment_frequency_display(),
 
         # Interest rates
         'monthly_interest_rate': float(product.monthly_interest_rate),
@@ -1121,7 +1342,7 @@ def loan_add_guarantor(request, loan_id):
     guarantor_number = current_count + 1
 
     if request.method == 'POST':
-        form = GuarantorForm(request.POST, loan=loan, user=request.user)
+        form = GuarantorForm(request.POST, request.FILES, loan=loan, user=request.user)
 
         if form.is_valid():
             guarantor = form.save()
@@ -1150,6 +1371,10 @@ def loan_add_guarantor(request, loan_id):
     else:
         form = GuarantorForm(loan=loan, user=request.user)
 
+    default_guarantee_amount = (
+        loan.principal_amount / Decimal(str(loan.loan_product.required_guarantors or 1))
+    ).quantize(Decimal('0.01'))
+
     context = {
         'page_title': f'Add Guarantor {guarantor_number} - {loan.loan_number}',
         'loan': loan,
@@ -1158,6 +1383,7 @@ def loan_add_guarantor(request, loan_id):
         'required_count': required_count,
         'current_count': current_count,
         'checker': checker,
+        'default_guarantee_amount': default_guarantee_amount,
     }
 
     return render(request, 'loans/guarantor_form.html', context)
@@ -1188,7 +1414,7 @@ def loan_edit_guarantor(request, loan_id, guarantor_id):
         return redirect('core:loan_guarantors', loan_id=loan.id)
 
     if request.method == 'POST':
-        form = GuarantorForm(request.POST, instance=guarantor, loan=loan, user=request.user)
+        form = GuarantorForm(request.POST, request.FILES, instance=guarantor, loan=loan, user=request.user)
 
         if form.is_valid():
             form.save()
@@ -1247,3 +1473,120 @@ def loan_delete_guarantor(request, loan_id, guarantor_id):
     }
 
     return render(request, 'loans/guarantor_delete.html', context)
+
+
+# =============================================================================
+# BAD DEBT WRITE-OFF
+# =============================================================================
+
+@login_required
+@transaction.atomic
+def loan_write_off(request, loan_id):
+    """
+    Write off a loan as bad debt.
+
+    Creates a journal entry:
+      Dr 5050 Bad Debt Expense    = outstanding_balance + accrued_interest_balance
+      Cr 1810 Loan Receivable     = outstanding_balance
+      Cr 1820 Interest Receivable = accrued_interest_balance (if > 0)
+
+    Sets loan.status = 'written_off' and zeroes the balances.
+
+    Permissions: Director and Admin only.
+    """
+    checker = PermissionChecker(request.user)
+    if not (checker.is_director() or checker.is_admin()):
+        messages.error(request, 'Only Directors and Administrators can write off loans.')
+        raise PermissionDenied
+
+    loan = get_object_or_404(
+        Loan.objects.select_related('client', 'branch', 'loan_product'),
+        id=loan_id,
+    )
+
+    if loan.status == 'written_off':
+        messages.warning(request, 'This loan has already been written off.')
+        return redirect('core:loan_detail', loan_id=loan.id)
+
+    if loan.status not in ['active', 'overdue']:
+        messages.error(request, f'Cannot write off a loan with status "{loan.get_status_display()}".')
+        return redirect('core:loan_detail', loan_id=loan.id)
+
+    outstanding = loan.outstanding_balance
+    accrued = loan.accrued_interest_balance
+    total_write_off = outstanding + accrued
+
+    if total_write_off <= Decimal('0.00'):
+        messages.error(request, 'This loan has no outstanding balance to write off.')
+        return redirect('core:loan_detail', loan_id=loan.id)
+
+    if request.method == 'POST':
+        reason = request.POST.get('reason', '').strip()
+        if not reason:
+            messages.error(request, 'Please provide a reason for the write-off.')
+        else:
+            try:
+                today = timezone.now().date()
+                ref = f'WRITE-OFF-{loan.loan_number}'
+
+                lines = [
+                    {
+                        'account_code': '5050',
+                        'debit': float(total_write_off),
+                        'credit': 0,
+                        'description': f'Bad debt write-off — {loan.loan_number}',
+                        'client': loan.client,
+                    },
+                    {
+                        'account_code': '1810',
+                        'debit': 0,
+                        'credit': float(outstanding),
+                        'description': f'Loan principal written off — {loan.loan_number}',
+                        'client': loan.client,
+                    },
+                ]
+                if accrued > Decimal('0.00'):
+                    lines.append({
+                        'account_code': '1820',
+                        'debit': 0,
+                        'credit': float(accrued),
+                        'description': f'Accrued interest written off — {loan.loan_number}',
+                        'client': loan.client,
+                    })
+
+                create_journal_entry(
+                    entry_type='other',
+                    transaction_date=today,
+                    branch=loan.branch,
+                    description=f'Bad debt write-off: {loan.loan_number} — {reason[:100]}',
+                    created_by=request.user,
+                    lines=lines,
+                    loan=loan,
+                    reference_number=ref,
+                    auto_post=True,
+                )
+
+                loan.status = 'written_off'
+                loan.outstanding_balance = Decimal('0.00')
+                loan.accrued_interest_balance = Decimal('0.00')
+                loan.save(update_fields=['status', 'outstanding_balance', 'accrued_interest_balance', 'updated_at'])
+
+                messages.success(
+                    request,
+                    f'Loan {loan.loan_number} has been written off. '
+                    f'Journal entry {ref} posted.'
+                )
+                return redirect('core:loan_detail', loan_id=loan.id)
+
+            except Exception as exc:
+                messages.error(request, f'Write-off failed: {exc}')
+
+    context = {
+        'page_title': f'Write Off Loan — {loan.loan_number}',
+        'loan': loan,
+        'outstanding': outstanding,
+        'accrued': accrued,
+        'total_write_off': total_write_off,
+        'checker': checker,
+    }
+    return render(request, 'loans/write_off.html', context)

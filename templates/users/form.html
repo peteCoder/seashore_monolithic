@@ -18,7 +18,7 @@
 
     <!-- Form -->
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6">
-        <form method="post">
+        <form method="post" enctype="multipart/form-data">
             {% csrf_token %}
 
             <!-- Name Fields -->
@@ -102,16 +102,87 @@
             </div>
 
             <!-- Active Status -->
-            <div class="mb-6">
-                <div class="flex items-center">
-                    {{ form.is_active }}
-                    <label for="{{ form.is_active.id_for_label }}" class="ml-2 block text-sm text-gray-900 dark:text-white">
-                        {{ form.is_active.label }}
-                    </label>
+            <div class="mb-6 border border-gray-200 dark:border-gray-700 rounded-xl p-4 flex items-center justify-between gap-4 bg-gray-50 dark:bg-gray-700/40">
+                <div>
+                    <p class="text-sm font-semibold text-gray-800 dark:text-white">Account Status</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Inactive staff cannot log in to the system.</p>
                 </div>
+
+                <div class="flex items-center gap-3">
+                    <span id="activeLabel" class="text-sm font-medium {% if form.is_active.value %}text-green-600 dark:text-green-400{% else %}text-red-500 dark:text-red-400{% endif %}">
+                        {% if form.is_active.value %}Active{% else %}Inactive{% endif %}
+                    </span>
+
+                    {# Hidden real checkbox — synced by JS #}
+                    <div class="hidden">{{ form.is_active }}</div>
+
+                    <button type="button" id="activeToggle" role="switch"
+                            aria-checked="{{ form.is_active.value|yesno:'true,false' }}"
+                            class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent
+                                   transition-colors duration-200 ease-in-out
+                                   focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500
+                                   {% if form.is_active.value %}bg-green-500{% else %}bg-gray-300 dark:bg-gray-600{% endif %}">
+                        <span class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg
+                                     transform transition duration-200 ease-in-out
+                                     {% if form.is_active.value %}translate-x-5{% else %}translate-x-0{% endif %}">
+                        </span>
+                    </button>
+                </div>
+
                 {% if form.is_active.errors %}
                 <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.is_active.errors.0 }}</p>
                 {% endif %}
+            </div>
+
+            <script>
+            (function () {
+                const toggle   = document.getElementById('activeToggle');
+                const checkbox = document.getElementById('{{ form.is_active.id_for_label }}');
+                const label    = document.getElementById('activeLabel');
+
+                toggle.addEventListener('click', function () {
+                    const isOn = this.getAttribute('aria-checked') === 'true';
+                    const next = !isOn;
+
+                    this.setAttribute('aria-checked', next);
+                    checkbox.checked = next;
+
+                    // Knob position
+                    this.querySelector('span').classList.toggle('translate-x-5', next);
+                    this.querySelector('span').classList.toggle('translate-x-0', !next);
+
+                    // Track colour
+                    this.classList.toggle('bg-green-500', next);
+                    this.classList.toggle('bg-gray-300', !next);
+                    this.classList.toggle('dark:bg-gray-600', !next);
+
+                    // Status label
+                    label.textContent = next ? 'Active' : 'Inactive';
+                    label.className = 'text-sm font-medium ' + (next
+                        ? 'text-green-600 dark:text-green-400'
+                        : 'text-red-500 dark:text-red-400');
+                });
+            }());
+            </script>
+
+            <!-- Profile Picture -->
+            <div class="mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Profile Picture
+                </label>
+                {% if staff_user.profile_picture %}
+                <div class="flex items-center space-x-4 mb-3">
+                    <img class="h-16 w-16 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
+                         src="{{ staff_user.profile_picture.url }}"
+                         alt="{{ staff_user.get_full_name }}">
+                    <span class="text-sm text-gray-500 dark:text-gray-400">Current picture — upload a new one to replace it.</span>
+                </div>
+                {% endif %}
+                {{ form.profile_picture }}
+                {% if form.profile_picture.errors %}
+                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ form.profile_picture.errors.0 }}</p>
+                {% endif %}
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">JPG, PNG or GIF. Optional.</p>
             </div>
 
             <!-- Buttons -->

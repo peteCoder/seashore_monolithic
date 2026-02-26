@@ -79,197 +79,208 @@ def send_email(to_email, subject, html_content):
 
 def send_password_reset_email(user, reset_token):
     """
-    Send password reset email with reset link
-    
+    Send password reset email with reset link.
+
     Args:
         user: User instance
         reset_token: Password reset token
-    
+
     Returns:
         bool: Success status
     """
-    # Build reset URL
-    site_url = getattr(settings, 'SITE_URL', 'http://localhost:8000')
+    site_url  = getattr(settings, 'SITE_URL', 'http://localhost:8000')
     reset_url = f"{site_url}/reset-password/{reset_token}/"
-    
-    subject = "Reset Your Seashore Microfinance Password 🔐"
-    
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            body {{
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                line-height: 1.6;
-                color: #333;
-                margin: 0;
-                padding: 0;
-                background-color: #f4f4f4;
-            }}
-            .container {{
-                max-width: 600px;
-                margin: 0 auto;
-                background-color: #ffffff;
-                border-radius: 10px;
-                overflow: hidden;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            }}
-            .header {{
-                background: linear-gradient(135deg, #eab308 0%, #ca8a04 100%);
-                color: white;
-                padding: 40px 20px;
-                text-align: center;
-            }}
-            .header h1 {{
-                margin: 0;
-                font-size: 28px;
-                font-weight: 700;
-            }}
-            .logo {{
-                font-size: 48px;
-                margin-bottom: 10px;
-            }}
-            .content {{
-                padding: 40px 30px;
-            }}
-            .greeting {{
-                font-size: 20px;
-                font-weight: 600;
-                color: #eab308;
-                margin-bottom: 20px;
-            }}
-            .message {{
-                font-size: 16px;
-                color: #555;
-                margin-bottom: 30px;
-            }}
-            .alert-box {{
-                background-color: #fef3c7;
-                border-left: 4px solid #eab308;
-                padding: 20px;
-                margin: 30px 0;
-            }}
-            .alert-box p {{
-                margin: 0;
-                color: #92400e;
-            }}
-            .cta-button {{
-                display: inline-block;
-                background: linear-gradient(135deg, #eab308 0%, #ca8a04 100%);
-                color: white;
-                padding: 15px 40px;
-                text-decoration: none;
-                border-radius: 5px;
-                font-weight: 600;
-                margin: 20px 0;
-                text-align: center;
-            }}
-            .cta-button:hover {{
-                background: linear-gradient(135deg, #ca8a04 0%, #a16207 100%);
-            }}
-            .token-box {{
-                background-color: #f9fafb;
-                border: 2px dashed #eab308;
-                padding: 20px;
-                text-align: center;
-                border-radius: 5px;
-                margin: 20px 0;
-            }}
-            .token {{
-                font-size: 24px;
-                font-weight: 700;
-                color: #eab308;
-                letter-spacing: 2px;
-            }}
-            .footer {{
-                background-color: #f8f9fa;
-                padding: 30px;
-                text-align: center;
-                font-size: 14px;
-                color: #666;
-            }}
-            .footer a {{
-                color: #eab308;
-                text-decoration: none;
-            }}
-            .divider {{
-                height: 1px;
-                background-color: #e5e7eb;
-                margin: 30px 0;
-            }}
-            .security-notice {{
-                background-color: #fef2f2;
-                border-left: 4px solid #ef4444;
-                padding: 15px;
-                margin-top: 30px;
-            }}
-            .security-notice p {{
-                margin: 5px 0;
-                color: #991b1b;
-                font-size: 14px;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <div class="logo">🏦</div>
-                <h1>Password Reset Request</h1>
-            </div>
-            
-            <div class="content">
-                <div class="greeting">
-                    Hello {user.get_full_name() or user.email}! 👋
-                </div>
-                
-                <div class="message">
-                    <p>We received a request to reset the password for your Seashore Microfinance account.</p>
-                    
-                    <p>If you made this request, click the button below to reset your password:</p>
-                </div>
-                
-                <div style="text-align: center;">
-                    <a href="{reset_url}" class="cta-button">
-                        🔐 Reset Password
-                    </a>
-                </div>
-                
-                <div class="alert-box">
-                    <p><strong>⏰ This link will expire in 1 hour</strong></p>
-                </div>
-                
-                <div class="divider"></div>
-                
-                <div class="message">
-                    <p><strong>Can't click the button?</strong> Copy and paste this link into your browser:</p>
-                    <p style="word-break: break-all; color: #eab308;">
-                        {reset_url}
-                    </p>
-                </div>
-                
-                <div class="security-notice">
-                    <p><strong>⚠️ Security Notice:</strong></p>
-                    <p>• If you didn't request this password reset, please ignore this email</p>
-                    <p>• Never share your password with anyone</p>
-                    <p>• Seashore staff will never ask for your password</p>
-                </div>
-            </div>
-            
-            <div class="footer">
-                <p><strong>Seashore Microfinance Bank</strong></p>
-                <p>Professional Microfinance Solutions</p>
-                <p style="margin-top: 20px; font-size: 12px; color: #999;">
-                    This email was sent to {user.email}. If you have any questions, contact support.
-                </p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    
+    name      = user.get_full_name() or user.email
+    year      = timezone.now().year
+
+    # ── Seashore brand colours ──────────────────────────────────────────────
+    AMBER     = "#f59e0b"
+    AMBER_DK  = "#d97706"
+    DARK      = "#111827"   # gray-900
+    DARK2     = "#1f2937"   # gray-800
+    BODY_BG   = "#f3f4f6"   # gray-100
+    CARD_BG   = "#ffffff"
+    TXT       = "#111827"
+    MUTED     = "#6b7280"
+    BORDER    = "#e5e7eb"
+
+    subject = "Reset Your Seashore Microfinance Password"
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{subject}</title>
+  <style>
+    @media only screen and (max-width:600px){{
+      .email-wrap{{width:100%!important;}}
+      .pad{{padding:24px 16px!important;}}
+    }}
+    body{{margin:0;padding:0;background-color:{BODY_BG};
+         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+         -webkit-text-size-adjust:100%;}}
+    table{{border-collapse:collapse;}}
+    a{{color:{AMBER};text-decoration:none;}}
+    .preheader{{display:none!important;visibility:hidden;font-size:1px;line-height:1px;
+                max-height:0;max-width:0;opacity:0;overflow:hidden;}}
+  </style>
+</head>
+<body>
+<span class="preheader">Reset your Seashore Microfinance password — link expires in 1 hour.</span>
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{BODY_BG};padding:32px 0;">
+<tr><td align="center">
+<table width="600" class="email-wrap" cellpadding="0" cellspacing="0" border="0">
+
+  <!-- ── HEADER ─────────────────────────────────────────────────────────── -->
+  <tr>
+    <td style="background:{DARK};border-radius:12px 12px 0 0;padding:36px 40px 32px;">
+
+      <!-- Logo row -->
+      <table cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <td>
+            <table cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <!-- Amber water-drop icon box -->
+                <td style="background:{AMBER};border-radius:10px;width:44px;height:44px;
+                            text-align:center;vertical-align:middle;font-size:22px;line-height:44px;">
+                  &#127754;
+                </td>
+                <td style="padding-left:12px;vertical-align:middle;">
+                  <span style="font-size:17px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">SEASHORE</span>
+                  <span style="font-size:10px;font-weight:500;color:{MUTED};letter-spacing:2px;
+                               display:block;margin-top:1px;">MICROFINANCE</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+          <td align="right" valign="middle">
+            <span style="font-size:10px;color:{MUTED};background:{DARK2};padding:4px 10px;
+                         border-radius:20px;letter-spacing:1px;font-weight:600;">SECURE</span>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Divider -->
+      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:24px;">
+        <tr><td style="height:1px;background:linear-gradient(to right,{AMBER},{DARK2},transparent);"></td></tr>
+      </table>
+
+      <!-- Title -->
+      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:24px;">
+        <tr>
+          <td>
+            <p style="margin:0;font-size:24px;font-weight:700;color:#ffffff;line-height:1.2;letter-spacing:-0.4px;">
+              Password Reset
+            </p>
+            <p style="margin:6px 0 0;font-size:13px;color:{MUTED};">
+              We received a request to reset your account password.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ── BODY ──────────────────────────────────────────────────────────── -->
+  <tr>
+    <td style="background:{CARD_BG};padding:36px 40px 28px;" class="pad">
+
+      <!-- Greeting -->
+      <p style="margin:0 0 6px;font-size:17px;font-weight:700;color:{TXT};">Hello, {name}.</p>
+      <p style="margin:0 0 28px;font-size:14px;color:{MUTED};line-height:1.7;">
+        We received a password reset request for the Seashore Microfinance account associated with
+        <strong style="color:{TXT};">{user.email}</strong>.
+        Click the button below to choose a new password. This link is valid for <strong>1&nbsp;hour</strong>.
+      </p>
+
+      <!-- CTA block -->
+      <table cellpadding="0" cellspacing="0" border="0" width="100%"
+             style="background:{DARK};border-radius:10px;margin-bottom:24px;">
+        <tr>
+          <td align="center" style="padding:36px 32px;">
+            <a href="{reset_url}"
+               style="display:inline-block;background:{AMBER};color:#ffffff;
+                      font-size:15px;font-weight:700;text-decoration:none;
+                      padding:15px 44px;border-radius:8px;letter-spacing:0.3px;">
+              Reset My Password &rarr;
+            </a>
+            <p style="margin:18px 0 0;font-size:12px;color:{MUTED};">
+              &#9203;&nbsp;This link expires in <strong style="color:{AMBER};">1 hour</strong>
+            </p>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Fallback URL -->
+      <table cellpadding="0" cellspacing="0" border="0" width="100%"
+             style="border:1px solid {BORDER};border-radius:8px;margin-bottom:24px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:{MUTED};
+                      letter-spacing:1.5px;text-transform:uppercase;">
+              Button not working? Copy this link:
+            </p>
+            <p style="margin:0;font-size:12px;color:{AMBER};word-break:break-all;
+                      background:{BODY_BG};padding:10px 14px;border-radius:6px;
+                      font-family:'Courier New',monospace;line-height:1.6;">
+              {reset_url}
+            </p>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Security notice -->
+      <table cellpadding="0" cellspacing="0" border="0" width="100%"
+             style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;margin-bottom:8px;">
+        <tr>
+          <td style="padding:16px 20px;">
+            <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#b45309;letter-spacing:0.5px;">
+              &#9888; SECURITY NOTICE
+            </p>
+            <p style="margin:0;font-size:13px;color:#78350f;line-height:1.6;">
+              If you did not request a password reset, ignore this email — your account remains secure.
+              Never share your password with anyone. Seashore staff will never ask for it.
+            </p>
+          </td>
+        </tr>
+      </table>
+
+    </td>
+  </tr>
+
+  <!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
+  <tr>
+    <td style="background:{DARK};border-radius:0 0 12px 12px;padding:28px 40px;
+               border-top:1px solid {DARK2};">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <td align="center">
+            <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:{MUTED};letter-spacing:1px;">
+              SEASHORE MICROFINANCE
+            </p>
+            <p style="margin:0 0 14px;font-size:11px;color:#374151;">
+              Professional Microfinance Solutions
+            </p>
+            <p style="margin:0;font-size:11px;color:#374151;line-height:1.7;">
+              &copy; {year} Seashore Microfinance. All rights reserved.<br>
+              This is an automated message — please do not reply to this email.<br>
+              Sent to {user.email}
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
     return send_email(user.email, subject, html_content)
 
 
@@ -472,13 +483,12 @@ def send_client_approval_email(client):
                 <div class="highlight">
                     <p><strong>Account Details:</strong></p>
                     <p>Client ID: {client.client_id}</p>
-                    <p>Level: {client.get_level_display()}</p>
                     <p>Branch: {client.branch.name}</p>
                 </div>
                 
                 <p>You can now:</p>
                 <ul>
-                    <li>Apply for loans up to ₦{client.get_loan_limit():,.2f}</li>
+                    <li>Apply for loans</li>
                     <li>Open savings accounts</li>
                     <li>Access our full range of financial services</li>
                 </ul>

@@ -27,7 +27,7 @@
                     {{ session.group.name }} - {{ session.collection_date|date:"F d, Y" }}
                 </p>
             </div>
-            <div class="flex items-center space-x-3">
+            <div class="flex flex-wrap items-center gap-3">
                 {% if session.status == 'pending' and checker.is_manager or checker.is_admin_or_director %}
                 <a href="{% url 'core:group_savings_collection_approve' session.id %}"
                    class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors shadow-sm">

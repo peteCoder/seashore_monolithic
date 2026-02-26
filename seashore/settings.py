@@ -46,7 +46,11 @@ SECRET_KEY = config("SECRET_KEY")
 DEBUG = config("DEBUG", default=True, cast=bool)
 
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = config(
+    "ALLOWED_HOSTS",
+    default="localhost,127.0.0.1",
+    cast=lambda v: [h.strip() for h in v.split(",") if h.strip()],
+)
 
 
 cloudinary.config(
@@ -64,7 +68,10 @@ CLOUDINARY_STORAGE = {
 
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
-
+# Africa's Talking SMS
+AT_USERNAME  = config('AT_USERNAME',  default='sandbox')
+AT_API_KEY   = config('AT_API_KEY',   default='')
+AT_SENDER_ID = config('AT_SENDER_ID', default='')
 
 
 # Application definition
@@ -82,7 +89,15 @@ INSTALLED_APPS = [
     # Third party apps
     'cloudinary_storage',
     'cloudinary',
+    'auditlog',
+    'django_celery_beat',
+    'django_celery_results',
+    'axes',
 
+    # REST API
+    'rest_framework',
+    'rest_framework.authtoken',
+    'drf_spectacular',
 
     'core',
 ]
@@ -96,6 +111,9 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'axes.middleware.AxesMiddleware',               # must be after AuthenticationMiddleware
+    'core.middleware.IPSessionLockMiddleware',      # terminates sessions on IP change
+    'auditlog.middleware.AuditlogMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -112,6 +130,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'core.context_processors.notifications',
             ],
         },
     },
@@ -123,20 +142,21 @@ WSGI_APPLICATION = 'seashore.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+DATABASES = {
+    'default': dj_database_url.config(
+        default=config('DATABASE_URL', default=f'sqlite:///{BASE_DIR / "db.sqlite3"}'),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
+}
+
+
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.sqlite3',
 #         'NAME': BASE_DIR / 'db.sqlite3',
 #     }
 # }
-
-DATABASES = {
-    'default': dj_database_url.config(
-        default=config('DATABASE_URL', default=f'sqlite:///{BASE_DIR / "db.sqlite3"}'),
-        conn_max_age=600
-    )
-}
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -202,3 +222,178 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# =============================================================================
+# Authentication Backends
+# =============================================================================
+AUTHENTICATION_BACKENDS = [
+    # django-axes must be first so lockouts are checked before authentication
+    'axes.backends.AxesStandaloneBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+
+# =============================================================================
+# django-axes — Login Throttling / Brute Force Protection
+# =============================================================================
+from datetime import timedelta as _timedelta  # noqa: E402
+
+AXES_FAILURE_LIMIT          = 5                          # lock after 5 failed attempts
+AXES_COOLOFF_TIME           = _timedelta(hours=1)        # unlock automatically after 1 hour
+AXES_LOCK_OUT_AT_FAILURE    = True
+AXES_RESET_ON_SUCCESS       = True                       # reset counter on successful login
+AXES_LOCKOUT_PARAMETERS     = ['username', 'ip_address'] # lock per username+IP combination
+AXES_ENABLE_ACCESS_FAILURE_LOG = True                    # log every failure to DB
+AXES_LOCKOUT_URL            = '/login/'                  # axes appends ?username=... so don't add our own ?params
+AXES_HTTP_RESPONSE_CODE     = 403
+
+
+# =============================================================================
+# Celery Configuration
+# =============================================================================
+import ssl as _ssl  # noqa: E402
+from celery.schedules import crontab  # noqa: E402
+
+REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+
+CELERY_BROKER_URL            = REDIS_URL
+# Suppress "no ssl options" warnings when using rediss:// with Upstash
+CELERY_BROKER_USE_SSL        = {'ssl_cert_reqs': _ssl.CERT_NONE}
+CELERY_RESULT_BACKEND        = 'django-db'          # Store task results in Django DB
+CELERY_CACHE_BACKEND         = 'django-cache'
+CELERY_TASK_SERIALIZER       = 'json'
+CELERY_RESULT_SERIALIZER     = 'json'
+CELERY_ACCEPT_CONTENT        = ['json']
+CELERY_TIMEZONE              = 'Africa/Lagos'
+CELERY_ENABLE_UTC            = True
+CELERY_TASK_TRACK_STARTED    = True
+CELERY_TASK_SOFT_TIME_LIMIT  = 300   # 5 min soft limit
+CELERY_TASK_TIME_LIMIT       = 360   # 6 min hard limit
+
+# Use django-celery-beat for periodic task storage (schedules live in the DB,
+# editable from the Django admin without restarting workers)
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# Default beat schedule — tasks are also manageable from Django admin
+CELERY_BEAT_SCHEDULE = {
+    # ── Loan tasks ──────────────────────────────────────────────────────────
+    'detect-overdue-loans-daily': {
+        'task':     'core.tasks.loan_tasks.detect_overdue_loans',
+        'schedule': crontab(hour=1, minute=0),        # 01:00 WAT daily
+    },
+    'recalculate-par-daily': {
+        'task':     'core.tasks.loan_tasks.recalculate_par',
+        'schedule': crontab(hour=1, minute=30),       # 01:30 WAT daily
+    },
+    'accrue-loan-interest-monthly': {
+        'task':     'core.tasks.loan_tasks.accrue_monthly_loan_interest',
+        'schedule': crontab(hour=2, minute=30, day_of_month=1),  # 1st of month 02:30 WAT
+    },
+    # ── Savings tasks ────────────────────────────────────────────────────────
+    'post-savings-interest-monthly': {
+        'task':     'core.tasks.savings_tasks.post_savings_interest',
+        'schedule': crontab(hour=2, minute=0, day_of_month=1),   # 1st of month 02:00 WAT
+    },
+    'alert-fd-maturities-daily': {
+        'task':     'core.tasks.savings_tasks.alert_fixed_deposit_maturities',
+        'schedule': crontab(hour=8, minute=0),        # 08:00 WAT daily
+    },
+    # ── Report / email tasks ─────────────────────────────────────────────────
+    'email-daily-par-digest': {
+        'task':     'core.tasks.report_tasks.email_daily_par_digest',
+        'schedule': crontab(hour=7, minute=0),        # 07:00 WAT daily
+    },
+    'email-monthly-summary': {
+        'task':     'core.tasks.report_tasks.email_monthly_summary',
+        'schedule': crontab(hour=6, minute=0, day_of_month=1),  # 1st of month 06:00 WAT
+    },
+    # ── SMS tasks (Africa's Talking) ─────────────────────────────────────────
+    'sms-repayment-reminders': {
+        'task':     'core.tasks.sms_tasks.send_repayment_reminders',
+        'schedule': crontab(hour=8, minute=0),   # 08:00 WAT daily
+    },
+    'sms-overdue-alerts': {
+        'task':     'core.tasks.sms_tasks.send_overdue_alerts',
+        'schedule': crontab(hour=9, minute=0),   # 09:00 WAT daily
+    },
+}
+
+# =============================================================================
+# Django REST Framework
+# =============================================================================
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 25,
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': '300/hour',
+    },
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Seashore Microfinance API',
+    'DESCRIPTION': (
+        'REST API for the Seashore Microfinance Information System. '
+        'Authenticate with a Token header: Authorization: Token <token>'
+    ),
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'TAGS': [
+        {'name': 'auth',     'description': 'Token authentication'},
+        {'name': 'clients',  'description': 'Client management'},
+        {'name': 'loans',    'description': 'Loan lifecycle'},
+        {'name': 'savings',  'description': 'Savings accounts'},
+        {'name': 'reports',  'description': 'Portfolio & financial reports'},
+    ],
+}
+
+# =============================================================================
+# Production Security Settings
+# (All are keyed off DEBUG so development is unaffected)
+# =============================================================================
+
+if not DEBUG:
+    # Force HTTPS
+    SECURE_SSL_REDIRECT          = True
+    SECURE_PROXY_SSL_HEADER      = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+    # HSTS — tell browsers to always use HTTPS for 1 year
+    SECURE_HSTS_SECONDS          = 31536000   # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD          = True
+
+    # Prevent browsers from MIME-sniffing the content type
+    SECURE_CONTENT_TYPE_NOSNIFF  = True
+
+    # Enable XSS filter in older browsers
+    SECURE_BROWSER_XSS_FILTER    = True
+
+    # Cookies only sent over HTTPS and inaccessible to JS
+    SESSION_COOKIE_SECURE        = True
+    SESSION_COOKIE_HTTPONLY      = True
+    SESSION_COOKIE_SAMESITE      = 'Lax'
+
+    CSRF_COOKIE_SECURE           = True
+    CSRF_COOKIE_HTTPONLY         = True
+    CSRF_COOKIE_SAMESITE         = 'Lax'
+
+    # Deny framing entirely (clickjacking protection)
+    X_FRAME_OPTIONS              = 'DENY'
+
+    # Session lifetime — expire after 8 hours of inactivity
+    SESSION_COOKIE_AGE           = 28800          # 8 hours in seconds
+    SESSION_SAVE_EVERY_REQUEST   = True           # slide the expiry on each request
+    SESSION_EXPIRE_AT_BROWSER_CLOSE = False

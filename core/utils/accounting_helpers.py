@@ -258,15 +258,27 @@ def post_loan_repayment_journal(
     principal_portion,
     interest_portion,
     processed_by,
-    transaction_obj
+    transaction_obj,
+    accrued_interest_to_clear=Decimal('0.00'),
 ):
     """
-    Create journal entry for loan repayment
+    Create journal entry for loan repayment.
 
-    Journal Entry:
-        Dr  1010 Cash In Hand                    xxx
-            Cr  1810 Loan Receivable - Principal    [principal]
-            Cr  4010 Interest Income - Loans        [interest]
+    When interest has been previously accrued (Dr 1820 / Cr 4010), the
+    incoming cash first clears that receivable (Cr 1820) rather than posting
+    income again (Cr 4010).  Any interest above the accrued amount is new
+    cash-basis income posted to 4010.
+
+    Journal Entry (no prior accrual):
+        Dr  1010 Cash In Hand                    [amount]
+            Cr  1810 Loan Receivable - Principal     [principal]
+            Cr  4010 Interest Income - Loans         [interest]
+
+    Journal Entry (with prior accrual):
+        Dr  1010 Cash In Hand                    [amount]
+            Cr  1810 Loan Receivable - Principal     [principal]
+            Cr  1820 Interest Receivable - Loans     [min(interest, accrued)]
+            Cr  4010 Interest Income - Loans         [max(0, interest - accrued)]
 
     Args:
         loan: Loan object
@@ -275,40 +287,60 @@ def post_loan_repayment_journal(
         interest_portion: Interest component
         processed_by: User processing the repayment
         transaction_obj: Transaction object
+        accrued_interest_to_clear: How much of interest_portion clears 1820
+                                   (from loan.accrued_interest_balance)
 
     Returns:
         JournalEntry: Created journal entry
     """
     cash_account = get_cash_account_for_branch(loan.branch)
 
+    # Split the interest between clearing the receivable and new income
+    clear_receivable = min(
+        Decimal(str(interest_portion)),
+        Decimal(str(accrued_interest_to_clear))
+    )
+    new_income = Decimal(str(interest_portion)) - clear_receivable
+
     lines = [
         {
-            'account_code': cash_account.gl_code,  # Cash In Hand
+            'account_code': cash_account.gl_code,
             'debit': amount,
             'credit': 0,
             'description': f"Loan repayment from {loan.client.get_full_name()}",
-            'client': loan.client
+            'client': loan.client,
         }
     ]
 
-    # Add principal portion
     if principal_portion > 0:
         lines.append({
-            'account_code': '1810',  # Loan Receivable - Principal
+            'account_code': '1810',   # Loan Receivable - Principal
             'debit': 0,
             'credit': principal_portion,
             'description': f"Principal repayment for loan {loan.loan_number}",
-            'client': loan.client
+            'client': loan.client,
         })
 
-    # Add interest portion
-    if interest_portion > 0:
+    # Clear previously-accrued interest (avoids double-counting in 4010)
+    if clear_receivable > 0:
         lines.append({
-            'account_code': '4010',  # Interest Income - Loans
+            'account_code': '1820',   # Interest Receivable - Loans
             'debit': 0,
-            'credit': interest_portion,
+            'credit': clear_receivable,
+            'description': (
+                f"Clearing accrued interest receivable for loan {loan.loan_number}"
+            ),
+            'client': loan.client,
+        })
+
+    # Any remaining interest is new cash-basis income
+    if new_income > 0:
+        lines.append({
+            'account_code': '4010',   # Interest Income - Loans
+            'debit': 0,
+            'credit': new_income,
             'description': f"Interest income from loan {loan.loan_number}",
-            'client': loan.client
+            'client': loan.client,
         })
 
     return create_journal_entry(
@@ -321,7 +353,7 @@ def post_loan_repayment_journal(
         transaction_obj=transaction_obj,
         loan=loan,
         reference_number=transaction_obj.transaction_ref,
-        auto_post=True
+        auto_post=True,
     )
 
 
@@ -441,6 +473,75 @@ def post_savings_withdrawal_journal(
     )
 
 
+def post_loan_upfront_fees_journal(loan, processed_by, transaction_obj):
+    """
+    Create a compound journal entry for all loan upfront fees collected at once.
+
+    Journal Entry:
+        Dr  1010 Cash In Hand                    [total_upfront_fees]
+            Cr  4150 Risk Premium Income          [risk_premium_fee]
+            Cr  4150 RP Income                    [rp_income_fee]
+            Cr  4160 Tech Fee Income              [tech_fee]
+            Cr  4120 Loan Form Fee Income         [loan_form_fee]
+
+    Args:
+        loan: Loan object (must have fee breakdown fields populated)
+        processed_by: User who collected the fees
+        transaction_obj: The Transaction object created in pay_fees()
+
+    Returns:
+        JournalEntry: Created journal entry
+    """
+    if loan.total_upfront_fees <= Decimal('0.00'):
+        return None
+
+    cash_account = get_cash_account_for_branch(loan.branch)
+
+    lines = [
+        {
+            'account_code': cash_account.gl_code,
+            'debit': loan.total_upfront_fees,
+            'credit': 0,
+            'description': f"Upfront fees collected for loan {loan.loan_number}",
+            'client': loan.client,
+        }
+    ]
+
+    fee_credit_lines = [
+        ('4150', loan.risk_premium_fee, 'Risk premium fee'),
+        ('4150', loan.rp_income_fee,    'RP income fee'),
+        ('4160', loan.tech_fee,         'Technology fee'),
+        ('4120', loan.loan_form_fee,    'Loan form fee'),
+    ]
+
+    for account_code, amount, description in fee_credit_lines:
+        if amount and amount > Decimal('0.00'):
+            lines.append({
+                'account_code': account_code,
+                'debit': 0,
+                'credit': amount,
+                'description': f"{description} for loan {loan.loan_number}",
+                'client': loan.client,
+            })
+
+    # Guard: only proceed if we have at least one credit line
+    if len(lines) < 2:
+        return None
+
+    return create_journal_entry(
+        entry_type='fee_collection',
+        transaction_date=transaction_obj.transaction_date,
+        branch=loan.branch,
+        description=f"Upfront Fees: {loan.loan_number}",
+        created_by=processed_by,
+        lines=lines,
+        transaction_obj=transaction_obj,
+        loan=loan,
+        reference_number=loan.loan_number,
+        auto_post=True,
+    )
+
+
 def post_fee_collection_journal(
     fee_type,
     amount,
@@ -469,13 +570,15 @@ def post_fee_collection_journal(
     """
     # Map fee types to income accounts
     fee_account_mapping = {
-        'registration_fee': '4110',
-        'loan_form_fee': '4120',
-        'loan_insurance_fee': '4130',
-        'processing_fee': '4140',
-        'risk_premium': '4150',
-        'tech_fee': '4160',
-        'late_payment_fee': '4170',
+        'registration_fee':    '4110',
+        'id_card_fee':         '4112',
+        'membership_card_fee': '4114',
+        'loan_form_fee':       '4120',
+        'loan_insurance_fee':  '4130',
+        'processing_fee':      '4140',
+        'risk_premium':        '4150',
+        'tech_fee':            '4160',
+        'late_payment_fee':    '4170',
     }
 
     income_account_code = fee_account_mapping.get(fee_type, '4110')  # Default to registration
@@ -508,4 +611,131 @@ def post_fee_collection_journal(
         transaction_obj=transaction_obj,
         reference_number=transaction_obj.transaction_ref,
         auto_post=True
+    )
+
+
+def post_savings_interest_journal(
+    savings_account,
+    interest_amount,
+    processed_by,
+    transaction_obj,
+    posting_date=None,
+):
+    """
+    Create journal entry when savings interest is credited to an account.
+
+    Journal Entry:
+        Dr  5010 Interest Expense - Savings     [interest_amount]
+            Cr  20xx Savings Deposits - [Type]   [interest_amount]
+
+    Args:
+        savings_account: SavingsAccount object
+        interest_amount: Interest being credited (Decimal)
+        processed_by: User who ran the job
+        transaction_obj: Transaction created by post_interest()
+        posting_date: Override date (default: today)
+
+    Returns:
+        JournalEntry
+    """
+    from django.utils import timezone as tz
+
+    savings_liability = get_savings_liability_account(
+        savings_account.savings_product.product_type
+    )
+
+    date = posting_date or tz.now().date()
+
+    lines = [
+        {
+            'account_code': '5010',            # Interest Expense - Savings
+            'debit': interest_amount,
+            'credit': 0,
+            'description': (
+                f"Interest expense for savings account {savings_account.account_number}"
+            ),
+            'client': savings_account.client,
+        },
+        {
+            'account_code': savings_liability.gl_code,  # Savings Deposits - [Type]
+            'debit': 0,
+            'credit': interest_amount,
+            'description': (
+                f"Interest credited to {savings_account.account_number}"
+            ),
+            'client': savings_account.client,
+        },
+    ]
+
+    return create_journal_entry(
+        entry_type='interest_credit',
+        transaction_date=date,
+        branch=savings_account.branch,
+        description=f"Savings Interest: {savings_account.account_number}",
+        created_by=processed_by,
+        lines=lines,
+        transaction_obj=transaction_obj,
+        savings_account=savings_account,
+        reference_number=transaction_obj.transaction_ref if transaction_obj else '',
+        auto_post=True,
+    )
+
+
+def post_loan_interest_accrual_journal(
+    loan,
+    accrued_interest,
+    processed_by,
+    accrual_reference,
+    accrual_date=None,
+):
+    """
+    Post month-end interest accrual for a loan.
+
+    Records interest that has been earned but not yet received (accrual basis).
+
+    Journal Entry:
+        Dr  1820 Interest Receivable - Loans    [accrued_interest]
+            Cr  4010 Interest Income - Loans     [accrued_interest]
+
+    Args:
+        loan: Loan object
+        accrued_interest: Amount accrued this period (Decimal)
+        processed_by: User who ran the job
+        accrual_reference: Unique ref to prevent duplicate postings (e.g. 'ACCRUAL-2026-02')
+        accrual_date: Date of accrual (default: today)
+
+    Returns:
+        JournalEntry
+    """
+    from django.utils import timezone as tz
+
+    date = accrual_date or tz.now().date()
+
+    lines = [
+        {
+            'account_code': '1820',   # Interest Receivable - Loans
+            'debit': accrued_interest,
+            'credit': 0,
+            'description': f"Accrued interest on loan {loan.loan_number}",
+            'client': loan.client,
+        },
+        {
+            'account_code': '4010',   # Interest Income - Loans
+            'debit': 0,
+            'credit': accrued_interest,
+            'description': f"Interest income accrual for loan {loan.loan_number}",
+            'client': loan.client,
+        },
+    ]
+
+    return create_journal_entry(
+        entry_type='interest_accrual',
+        transaction_date=date,
+        branch=loan.branch,
+        description=f"Interest Accrual: {loan.loan_number} [{accrual_reference}]",
+        created_by=processed_by,
+        lines=lines,
+        loan=loan,
+        reference_number=f"{accrual_reference}-{loan.loan_number}",
+        auto_post=True,
     )

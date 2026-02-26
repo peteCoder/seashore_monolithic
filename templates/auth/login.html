@@ -17,9 +17,7 @@
             <!-- Logo & Brand -->
             <div class="space-y-6">
                 <div class="flex items-center space-x-4">
-                    <div class="w-14 h-14 bg-amber-500 rounded-2xl flex items-center justify-center">
-                        <i class="fas fa-water text-white text-2xl"></i>
-                    </div>
+                    <img src="https://res.cloudinary.com/degqttxsx/image/upload/v1772089780/seashore-logo_withoutbg_t8ambq.png" alt="Seashore Logo" class="w-14 h-14 object-contain flex-shrink-0">
                     <div>
                         <h1 class="text-2xl font-bold uppercase tracking-wide">Seashore</h1>
                         <p class="text-sm text-gray-400 uppercase tracking-wider">Financial Company</p>
@@ -61,9 +59,7 @@
         
         <!-- Mobile Logo -->
         <div class="lg:hidden absolute top-8 left-1/2 -translate-x-1/2 flex items-center space-x-3">
-            <div class="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center">
-                <i class="fas fa-water text-white text-lg"></i>
-            </div>
+            <img src="https://res.cloudinary.com/degqttxsx/image/upload/v1772089780/seashore-logo_withoutbg_t8ambq.png" alt="Seashore Logo" class="w-10 h-10 object-contain flex-shrink-0">
             <div>
                 <h1 class="text-lg font-bold text-gray-900 dark:text-white">SEASHORE</h1>
                 <p class="text-xs text-gray-500 dark:text-gray-400">FINANCIAL COMPANY</p>
@@ -89,6 +85,16 @@
                     <form method="post" class="space-y-6">
                         {% csrf_token %}
                         
+                        <!-- Account Lockout Error -->
+                        {% if lockout_error %}
+                        <div class="p-4 bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 rounded-lg">
+                            <div class="flex items-start">
+                                <i class="fas fa-lock text-red-500 mt-0.5 mr-3"></i>
+                                <p class="text-sm text-red-600 dark:text-red-400 font-medium">{{ lockout_error }}</p>
+                            </div>
+                        </div>
+                        {% endif %}
+
                         <!-- Non-field Errors (Display at top before fields) -->
                         {% if form.non_field_errors %}
                         <div class="p-4 bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 rounded-lg">
@@ -155,14 +161,13 @@
                             {% endif %}
                         </div>
                         
-                        <!-- Remember Me & Forgot Password -->
-                        <!-- <div class="flex items-center justify-between text-sm pt-2">
-                            
-                            <a href="{% url 'core:password_reset_request' %}" 
+                        <!-- Forgot Password -->
+                        <div class="flex items-center justify-end text-sm pt-1">
+                            <a href="{% url 'core:password_reset_request' %}"
                                class="text-amber-600 hover:text-amber-700 dark:text-amber-500 dark:hover:text-amber-400 font-medium transition-colors">
                                 Forgot password?
                             </a>
-                        </div> -->
+                        </div>
                         
                         <!-- Submit Button -->
                         <button type="submit" 

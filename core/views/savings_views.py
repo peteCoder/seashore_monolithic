@@ -19,6 +19,7 @@ from core.models import (
     SavingsAccount, SavingsProduct, SavingsDepositPosting,
     SavingsWithdrawalPosting, Client, Branch, Transaction
 )
+from core.services.notification_service import notify, notify_role
 from core.forms.savings_forms import (
     SavingsAccountForm, SavingsAccountSearchForm, SavingsAccountApprovalForm,
     SavingsDepositPostingForm, BulkSavingsDepositPostingForm,
@@ -172,6 +173,18 @@ def savings_account_create(request):
             account.status = 'pending'
             account.save()
 
+            # Notify branch manager that a new savings account needs approval
+            notify_role(
+                roles='manager',
+                branch=account.branch,
+                notification_type='savings_created',
+                title='New Savings Account Pending Approval',
+                message=f'A new savings account {account.account_number} for {account.client.get_full_name()} has been created and is awaiting approval.',
+                related_savings=account,
+                related_client=account.client,
+                exclude_user=request.user,
+            )
+
             messages.success(
                 request,
                 f'Savings account {account.account_number} created successfully. '
@@ -232,6 +245,26 @@ def savings_account_approve(request, account_id):
                     request,
                     f'Savings account {account.account_number} approved successfully.'
                 )
+                staff = account.client.assigned_staff
+                if staff:
+                    notify(
+                        user=staff,
+                        notification_type='savings_approved',
+                        title='Savings Account Approved',
+                        message=f'Savings account {account.account_number} for {account.client.get_full_name()} has been approved.',
+                        related_savings=account,
+                        related_client=account.client,
+                    )
+                notify_role(
+                    roles='manager',
+                    branch=account.branch,
+                    notification_type='savings_approved',
+                    title='Savings Account Approved',
+                    message=f'Savings account {account.account_number} for {account.client.get_full_name()} has been approved by {request.user.get_full_name()}.',
+                    related_savings=account,
+                    related_client=account.client,
+                    exclude_user=request.user,
+                )
             else:
                 account.status = 'rejected'
                 account.rejection_reason = notes
@@ -240,6 +273,17 @@ def savings_account_approve(request, account_id):
                 messages.warning(
                     request,
                     f'Savings account {account.account_number} rejected.'
+                )
+                notify_role(
+                    roles='manager',
+                    branch=account.branch,
+                    notification_type='transaction_rejected',
+                    title='Savings Account Rejected',
+                    message=f'Savings account {account.account_number} for {account.client.get_full_name()} was rejected by {request.user.get_full_name()}. Reason: {notes or "No reason given"}',
+                    related_savings=account,
+                    related_client=account.client,
+                    is_urgent=True,
+                    exclude_user=request.user,
                 )
 
             return redirect('core:savings_account_detail', account_id=account.id)
@@ -293,6 +337,18 @@ def savings_deposit_post(request, account_id=None):
                 posting.savings_account = account
 
             posting.save()
+
+            # Notify branch manager that a deposit needs approval
+            notify_role(
+                roles='manager',
+                branch=posting.savings_account.branch,
+                notification_type='deposit_pending',
+                title='Deposit Pending Approval',
+                message=f'A deposit of ₦{posting.amount:,.2f} for savings account {posting.savings_account.account_number} ({posting.savings_account.client.get_full_name()}) has been submitted and is awaiting approval.',
+                related_savings=posting.savings_account,
+                related_client=posting.savings_account.client,
+                exclude_user=request.user,
+            )
 
             messages.success(
                 request,
@@ -357,6 +413,8 @@ def savings_deposit_post_bulk(request):
                 amount_key = f'amount_{account_id}'
                 amount = request.POST.get(amount_key)
 
+                if amount:
+                    amount = amount.replace(',', '')
                 if amount and float(amount) > 0:
                     try:
                         account = SavingsAccount.objects.get(id=account_id)
@@ -387,6 +445,17 @@ def savings_deposit_post_bulk(request):
                 f'Successfully posted {len(created_postings)} deposit(s). '
                 f'Awaiting approval from manager/director.'
             )
+            # Notify branch managers (one notification per branch)
+            branches_to_notify = {p.savings_account.branch for p in created_postings if p.savings_account.branch}
+            for branch in branches_to_notify:
+                notify_role(
+                    roles='manager',
+                    branch=branch,
+                    notification_type='deposit_pending',
+                    title='Bulk Deposits Pending Approval',
+                    message=f'{len(created_postings)} deposit posting(s) submitted by {request.user.get_full_name()} are awaiting approval.',
+                    exclude_user=request.user,
+                )
 
         if errors:
             for error in errors:
@@ -444,6 +513,18 @@ def savings_withdrawal_post(request, account_id=None):
                 posting.savings_account = account
 
             posting.save()
+
+            # Notify branch manager that a withdrawal needs approval
+            notify_role(
+                roles='manager',
+                branch=posting.savings_account.branch,
+                notification_type='withdrawal_pending',
+                title='Withdrawal Pending Approval',
+                message=f'A withdrawal of ₦{posting.amount:,.2f} from savings account {posting.savings_account.account_number} ({posting.savings_account.client.get_full_name()}) has been submitted and is awaiting approval.',
+                related_savings=posting.savings_account,
+                related_client=posting.savings_account.client,
+                exclude_user=request.user,
+            )
 
             messages.success(
                 request,
@@ -544,6 +625,17 @@ def savings_withdrawal_post_bulk(request):
                 f'Successfully posted {len(created_postings)} withdrawal(s). '
                 f'Awaiting approval from manager/director.'
             )
+            # Notify branch managers (one notification per branch)
+            branches_to_notify = {p.savings_account.branch for p in created_postings if p.savings_account.branch}
+            for branch in branches_to_notify:
+                notify_role(
+                    roles='manager',
+                    branch=branch,
+                    notification_type='withdrawal_pending',
+                    title='Bulk Withdrawals Pending Approval',
+                    message=f'{len(created_postings)} withdrawal posting(s) submitted by {request.user.get_full_name()} are awaiting approval.',
+                    exclude_user=request.user,
+                )
 
         if errors:
             for error in errors:
@@ -609,7 +701,13 @@ def savings_transaction_list(request):
         withdrawal_postings = withdrawal_postings.filter(branch=request.user.branch)
 
     # Status filtering
-    if status_filter:
+    if status_filter == 'pending_deposits':
+        deposit_postings = deposit_postings.filter(status='pending')
+        withdrawal_postings = withdrawal_postings.none()
+    elif status_filter == 'pending_withdrawals':
+        withdrawal_postings = withdrawal_postings.filter(status='pending')
+        deposit_postings = deposit_postings.none()
+    elif status_filter in ('approved', 'rejected', 'pending'):
         deposit_postings = deposit_postings.filter(status=status_filter)
         withdrawal_postings = withdrawal_postings.filter(status=status_filter)
 
@@ -649,9 +747,19 @@ def savings_transaction_list(request):
         all_deposits = all_deposits.filter(branch=request.user.branch)
         all_withdrawals = all_withdrawals.filter(branch=request.user.branch)
 
+    total_deposits_count = all_deposits.count()
+    total_withdrawals_count = all_withdrawals.count()
+    approved_deposit_amount = all_deposits.filter(status='approved').aggregate(
+        Sum('amount')
+    )['amount__sum'] or Decimal('0.00')
+    approved_withdrawal_amount = all_withdrawals.filter(status='approved').aggregate(
+        Sum('amount')
+    )['amount__sum'] or Decimal('0.00')
+
     summary = {
-        'total_deposits': all_deposits.count(),
-        'total_withdrawals': all_withdrawals.count(),
+        'total_deposits': total_deposits_count,
+        'total_withdrawals': total_withdrawals_count,
+        'total_count': total_deposits_count + total_withdrawals_count,
         'pending_deposits': all_deposits.filter(status='pending').count(),
         'pending_withdrawals': all_withdrawals.filter(status='pending').count(),
         'pending_deposit_amount': all_deposits.filter(status='pending').aggregate(
@@ -660,12 +768,9 @@ def savings_transaction_list(request):
         'pending_withdrawal_amount': all_withdrawals.filter(status='pending').aggregate(
             Sum('amount')
         )['amount__sum'] or Decimal('0.00'),
-        'approved_deposit_amount': all_deposits.filter(status='approved').aggregate(
-            Sum('amount')
-        )['amount__sum'] or Decimal('0.00'),
-        'approved_withdrawal_amount': all_withdrawals.filter(status='approved').aggregate(
-            Sum('amount')
-        )['amount__sum'] or Decimal('0.00'),
+        'approved_deposit_amount': approved_deposit_amount,
+        'approved_withdrawal_amount': approved_withdrawal_amount,
+        'approved_amount': approved_deposit_amount + approved_withdrawal_amount,
     }
 
     context = {
@@ -731,11 +836,49 @@ def savings_transaction_approve(request, posting_type, posting_id):
                         f'{posting_type.capitalize()} posting {posting.posting_ref} approved successfully. '
                         f'Account balance updated.'
                     )
+                    notify(
+                        user=posting.submitted_by,
+                        notification_type='transaction_approved',
+                        title=f'{posting_type.capitalize()} Approved',
+                        message=f'{posting_type.capitalize()} of ₦{posting.amount:,.2f} for account {posting.savings_account.account_number} has been approved.',
+                        related_savings=posting.savings_account,
+                        related_client=posting.savings_account.client,
+                    )
+                    notify_role(
+                        roles='manager',
+                        branch=posting.savings_account.branch,
+                        notification_type='transaction_approved',
+                        title=f'{posting_type.capitalize()} Approved',
+                        message=f'{posting_type.capitalize()} of ₦{posting.amount:,.2f} for account {posting.savings_account.account_number} ({posting.savings_account.client.get_full_name()}) approved by {request.user.get_full_name()}.',
+                        related_savings=posting.savings_account,
+                        related_client=posting.savings_account.client,
+                        exclude_user=request.user,
+                    )
                 else:
                     posting.reject(rejected_by=request.user, reason=notes)
                     messages.warning(
                         request,
                         f'{posting_type.capitalize()} posting {posting.posting_ref} rejected.'
+                    )
+                    notify(
+                        user=posting.submitted_by,
+                        notification_type='transaction_rejected',
+                        title=f'{posting_type.capitalize()} Rejected',
+                        message=f'{posting_type.capitalize()} posting {posting.posting_ref} for account {posting.savings_account.account_number} was rejected. Reason: {notes or "No reason given"}',
+                        related_savings=posting.savings_account,
+                        related_client=posting.savings_account.client,
+                        is_urgent=True,
+                    )
+                    notify_role(
+                        roles='manager',
+                        branch=posting.savings_account.branch,
+                        notification_type='transaction_rejected',
+                        title=f'{posting_type.capitalize()} Rejected',
+                        message=f'{posting_type.capitalize()} posting {posting.posting_ref} for account {posting.savings_account.account_number} ({posting.savings_account.client.get_full_name()}) rejected by {request.user.get_full_name()}. Reason: {notes or "No reason given"}',
+                        related_savings=posting.savings_account,
+                        related_client=posting.savings_account.client,
+                        is_urgent=True,
+                        exclude_user=request.user,
                     )
 
                 return redirect('core:savings_transaction_list')

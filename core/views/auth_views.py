@@ -208,43 +208,70 @@ def login_view(request):
             user = authenticate(request, email=email, password=password)
             
             if user is not None:
-                # Check if user is active
-                if not user.is_active:
-                    form.add_error(None, 'Your account has been deactivated. Please contact admin.')
-                    return render(request, 'auth/login.html', {'form': form})
-                
                 # Check if user is approved
                 if not user.is_approved:
                     form.add_error(None, 'Your account is pending approval. Please wait for admin approval.')
                     return render(request, 'auth/login.html', {'form': form})
                 
-                # Log in user
-                login(request, user)
-                
                 # Set session expiry
                 if not remember_me:
                     request.session.set_expiry(0)  # Session expires on browser close
-                
+
                 # Update last login
                 user.last_login = timezone.now()
                 user.save(update_fields=['last_login'])
-                
+
+                # If user has 2FA enabled, park the UID and redirect to verify
+                if user.is_2fa_enabled:
+                    request.session['_2fa_pending_uid'] = str(user.pk)
+                    next_url = request.GET.get('next', '')
+                    verify_url = '/verify-2fa/' + (f'?next={next_url}' if next_url else '')
+                    return redirect(verify_url)
+
+                # No 2FA — log in normally
+                login(request, user)
+
+                # Record login IP for IP-session locking (core.middleware.IPSessionLockMiddleware)
+                x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR', '')
+                login_ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.META.get('REMOTE_ADDR', '')
+                request.session['login_ip'] = login_ip
+
                 messages.success(request, f'Welcome back, {user.get_full_name()}!')
-                
+
                 # Redirect to next or dashboard
                 next_url = request.GET.get('next', 'core:dashboard')
                 return redirect(next_url)
             else:
-                # Add error to form instead of using messages
-                form.add_error(None, 'Invalid email or password. Please try again.')
+                # authenticate() returns None for wrong credentials AND for inactive users.
+                # Check whether the credentials are correct but the account is inactive.
+                from core.models import User as StaffUser
+                try:
+                    existing = StaffUser.objects.get(email=email)
+                    if existing.check_password(password) and not existing.is_active:
+                        form.add_error(None, 'Your account is inactive. Please contact the administrator to reactivate it.')
+                    elif existing.check_password(password) and not existing.is_approved:
+                        form.add_error(None, 'Your account is pending approval. Please wait for admin approval.')
+                    else:
+                        form.add_error(None, 'Invalid email or password. Please try again.')
+                except StaffUser.DoesNotExist:
+                    form.add_error(None, 'Invalid email or password. Please try again.')
     else:
         form = LoginForm()
-    
+
+    # django-axes redirects here with ?username=<email> when an account is locked out
+    lockout_error = None
+    if request.method == 'GET' and request.GET.get('username'):
+        lockout_error = (
+            'Too many failed login attempts. Your account has been locked for 1 hour. '
+            'Please try again after 1 hour, or contact the administrator to unlock it immediately.'
+        )
+
     context = {
         'form': form,
-        'page_title': 'Login'
+        'page_title': 'Login',
+        'lockout_error': lockout_error,
     }
-    
+
     return render(request, 'auth/login.html', context)
 
 

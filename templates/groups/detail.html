@@ -12,7 +12,7 @@
             <span>/</span>
             <span>{{ group.name }}</span>
         </div>
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div class="flex items-center space-x-4">
                 <div class="h-16 w-16 bg-primary-100 dark:bg-primary-900 rounded-lg flex items-center justify-center">
                     <i class="fas fa-users text-3xl text-primary-600 dark:text-primary-400"></i>
@@ -39,7 +39,7 @@
                 </span>
                 {% endif %}
             </div>
-            <div class="flex items-center space-x-2">
+            <div class="flex flex-wrap items-center gap-3">
                 {% if checker.is_admin_or_director or checker.is_manager and group.branch == checker.user.branch or checker.is_staff and group.loan_officer == checker.user %}
                 <a href="{% url 'core:group_update' group.id %}"
                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium">

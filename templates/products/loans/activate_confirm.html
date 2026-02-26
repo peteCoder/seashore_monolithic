@@ -29,7 +29,7 @@
             </div>
             <div>
                 <p class="text-sm text-gray-600 dark:text-gray-400">Interest Rate</p>
-                <p class="text-base font-medium text-gray-900 dark:text-white">{{ product.monthly_interest_rate }}% monthly</p>
+                <p class="text-base font-medium text-gray-900 dark:text-white">{{ product.monthly_interest_rate_pct|floatformat:2 }}% monthly</p>
             </div>
         </div>
     </div>

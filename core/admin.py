@@ -61,9 +61,9 @@ class ClientGroupAdmin(admin.ModelAdmin):
 
 @admin.register(Client)
 class ClientAdmin(admin.ModelAdmin):
-    list_display = ['client_id', 'get_full_name', 'email', 'phone', 'branch', 
-                   'level', 'approval_status', 'registration_fee_paid']
-    list_filter = ['level', 'approval_status', 'registration_fee_paid', 
+    list_display = ['client_id', 'get_full_name', 'email', 'phone', 'branch',
+                   'approval_status', 'registration_fee_paid']
+    list_filter = ['approval_status', 'registration_fee_paid',
                   'branch', 'group', 'is_active']
     search_fields = ['client_id', 'email', 'first_name', 'last_name', 'phone']
     readonly_fields = ['client_id', 'created_at', 'updated_at']
@@ -84,8 +84,7 @@ class ClientAdmin(admin.ModelAdmin):
             'fields': ('branch', 'group', 'assigned_staff', 'union_location')
         }),
         ('Client Status', {
-            'fields': ('level', 'credit_score', 'risk_rating', 
-                      'registration_fee_paid', 'approval_status', 'is_active')
+            'fields': ('registration_fee_paid', 'approval_status', 'is_active')
         }),
         ('Employment/Business', {
             'fields': ('occupation', 'employer', 'monthly_income',
