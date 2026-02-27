@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -e errexit
 
 echo "================================"
 echo "Starting Django Build for Vercel"
